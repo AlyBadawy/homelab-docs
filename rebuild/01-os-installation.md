@@ -3,7 +3,7 @@
 **Target Hardware:** Beelink Mini S12
 **OS:** Ubuntu Server 24.04 LTS
 **Storage:** 256GB SSD
-**Network:** Gigabit Ethernet (enp1s0)
+**Network:** 2.5 Gigabit Ethernet (enp1s0)
 
 This guide walks through a clean Ubuntu Server installation on the Beelink Mini S12, from ISO download to post-installation hardening.
 
@@ -67,19 +67,23 @@ sudo sync
 ## 4. Ubuntu Installation Steps
 
 ### Language Selection
+
 - Select **English** and press Enter
 
 ### Keyboard Configuration
+
 - Select your keyboard layout (default is fine for most users)
 - Press Enter to continue
 
 ### Network Configuration
+
 - Ubuntu will auto-detect the Gigabit Ethernet interface (likely `enp1s0`)
 - Select **DHCP** (automatic IP configuration) for now
 - You will configure a static IP after the OS is installed
 - Press Enter to continue
 
 ### Storage Configuration
+
 - The installer will detect the 256GB SSD
 - Select **Use entire disk** (the default option)
 - Select the detected SSD device
@@ -90,18 +94,21 @@ sudo sync
 **Warning:** This step is destructive. Verify you are formatting the correct disk.
 
 ### Profile Setup
-- **Hostname:** Enter `lab` (the full DNS name will be `lab.in.alybadawy.com`, registered on the UDR7 internal DNS)
-- **Username:** Enter `aly`
+
+- **Hostname:** Enter `lab` (the full DNS name will be `lab.in.alybadawy.com` — configured properly in a post-install step)
+- **Username:** Enter `alybadawy`
 - **Password:** Create a strong password (mix of uppercase, lowercase, numbers, special chars)
 - Confirm the password
 - Press Enter to continue
 
 ### SSH Server
+
 - Select **Install OpenSSH server** (checkmark should be present)
 - When prompted, **Generate SSH keypair** (recommended) or use password auth only
 - Press Enter to continue
 
 ### Featured Server Snaps
+
 - This step offers optional snap packages (VSCode, LXD, Docker, etc.)
 - **Select NONE** — do not install any snaps
   - Docker will be installed via the official Docker repository (cleaner, more flexible)
@@ -109,6 +116,7 @@ sudo sync
 - Press Enter to skip
 
 ### Installation Complete
+
 - Once the installer finishes, press Enter or wait for automatic reboot
 - Remove the USB drive after the system reboots
 
@@ -116,7 +124,7 @@ sudo sync
 
 ## 5. First Login and Basic Updates
 
-Log in with username `aly` and the password you created.
+Log in with username `alybadawy` and the password you created.
 
 Update the package manager and install security updates:
 
@@ -131,6 +139,7 @@ sudo apt install -y curl wget git htop vim ufw net-tools
 ```
 
 **Package descriptions:**
+
 - `curl`: Command-line HTTP client
 - `wget`: File downloader
 - `git`: Version control
@@ -141,49 +150,95 @@ sudo apt install -y curl wget git htop vim ufw net-tools
 
 ---
 
-## 6. Configure Static IP Address
+## 6. Verify IP Address
 
-Ubuntu 24.04 uses Netplan for network configuration. Edit the Netplan configuration file:
+The homelab's IP (`172.20.20.5`) is assigned by the UDR7's DHCP server as a **fixed/reserved lease** — the router always hands out the same IP to this machine based on its MAC address. No static IP configuration is needed on the OS side.
 
-```bash
-sudo vim /etc/netplan/00-installer-config.yaml
-```
+> **Before this step:** Ensure the DHCP reservation is already configured on the UDR7. In UniFi Network, go to **Network → [Servers VLAN] → DHCP → Fixed IPs** and create a reservation for the Beelink's MAC address with IP `172.20.20.5`.
 
-Replace the contents with your static IP configuration:
-
-```yaml
-# /etc/netplan/00-installer-config.yaml
-network:
-  version: 2
-  ethernets:
-    enp1s0:
-      dhcp4: no
-      addresses:
-        - 172.20.20.5/24           # Homelab static IP on Servers VLAN
-      routes:
-        - to: default
-          via: 172.20.20.1           # UDR7 gateway for Servers VLAN (VLAN 20)
-      nameservers:
-        addresses: [172.20.20.1]     # UDR7 internal DNS (handles all VLANs)
-```
-
-> **Note:** `enp1s0` is the typical Ethernet interface name on the Beelink. Confirm it with `ip link show` during installation — it may also appear as `eth0` or `eno1`.
-
-Apply the configuration:
+After the first boot, verify the server received the correct IP:
 
 ```bash
-sudo netplan apply
+ip addr show
 ```
 
-Verify the static IP is assigned:
+Look for `172.20.20.5/24` on the Ethernet interface (typically `enp1s0` on the Beelink — confirm with `ip link show` if unsure).
+
+Also verify the default route points to the UDR7 gateway:
 
 ```bash
-ip addr show enp1s0
+ip route show
+# Expected: default via 172.20.20.1
 ```
 
 ---
 
-## 7. Disable Snapd (Optional, for a Lean System)
+## 7. Set Hostname and Hosts File
+
+The installer sets the short hostname (`lab`), but the full qualified name and `/etc/hosts` need to be configured manually.
+
+### Verify and set the hostname
+
+```bash
+hostnamectl
+```
+
+The output should show `Static hostname: lab`. If it doesn't match, set it:
+
+```bash
+sudo hostnamectl set-hostname lab
+```
+
+Verify:
+
+```bash
+hostname          # → lab
+hostname -f       # → lab (FQDN resolves once hosts file is updated below)
+```
+
+### Update /etc/hosts
+
+Open the hosts file:
+
+```bash
+sudo nano /etc/hosts
+```
+
+It will look something like this by default:
+
+```
+127.0.0.1   localhost
+127.0.1.1   lab
+```
+
+Replace `127.0.1.1   lab` with the real LAN IP and full hostname:
+
+```
+127.0.0.1       localhost
+172.20.20.5     lab.in.alybadawy.com  lab
+```
+
+Save and close (`Ctrl+O`, `Enter`, `Ctrl+X`).
+
+Verify the FQDN resolves correctly:
+
+```bash
+hostname -f
+# → lab.in.alybadawy.com
+```
+
+### Register DNS record on UDR7
+
+For other devices on the network to resolve `lab.in.alybadawy.com`, add an A record in the UDR7's internal DNS:
+
+- In UniFi Network go to **Settings → Networks → [DNS / Local DNS Records]**
+- Add: `lab.in.alybadawy.com` → `172.20.20.5`
+
+This is separate from the `*.in.alybadawy.com` wildcard record (which points to the homelab for service subdomains) — `lab.in.alybadawy.com` is the server's own identity record.
+
+---
+
+## 8. Disable Snapd (Optional, for a Lean System)
 
 If you want to remove Snapd entirely (saves disk space and boot time):
 
@@ -197,7 +252,7 @@ This is optional but recommended for a minimal homelab server.
 
 ---
 
-## 8. Configure Swap File
+## 9. Configure Swap File
 
 Create an 8GB swap file to handle memory pressure (useful if running many containers):
 
@@ -226,11 +281,38 @@ Verify swap is active:
 ```bash
 free -h
 # Should show 8G in the Swap row
+
+swapon --show
+# Should show: /swapfile  file  8G  0B   -2
+```
+
+### Verify disk partition layout and free space
+
+After creating the swap file, confirm the overall disk usage looks as expected:
+
+```bash
+df -h
+```
+
+Expected output (approximate):
+
+```
+Filesystem      Size  Used Avail Use% Mounted on
+/dev/sda2       240G  8.5G  230G   4% /
+/dev/sda1       1.1G  6.1M  1.1G   1% /boot/efi
+```
+
+> The root partition (`/`) should show roughly 8–9 GB used (OS + packages + swap file) and ~230 GB available. If it looks significantly different, check that the installer used the full disk.
+
+For a full picture of partition structure including types and UUIDs:
+
+```bash
+lsblk -f
 ```
 
 ---
 
-## 9. Enable UFW Firewall
+## 10. Enable UFW Firewall
 
 Configure the Uncomplicated Firewall to block unauthorized access:
 
@@ -266,7 +348,7 @@ You should see all rules listed with `ALLOW` status.
 
 ---
 
-## 10. Enable Automatic Security Updates
+## 11. Enable Automatic Security Updates
 
 Install and configure unattended-upgrades to apply security patches automatically:
 
@@ -279,7 +361,7 @@ This will prompt for a mail notification setting. You can skip it for a home ser
 
 ---
 
-## 11. NFS Client Setup (for NAS Mounts)
+## 12. NFS Client Setup (for NAS Mounts)
 
 Install the NFS client package — this is all that's needed at this stage:
 
@@ -290,48 +372,53 @@ sudo apt install -y nfs-common
 Create the mount point directories so they exist before fstab is configured:
 
 ```bash
-sudo mkdir -p /mnt/nas/cloud /mnt/nas/immich /mnt/nas/media
+sudo mkdir -p /mnt/nas/homelab
 ```
 
 > **Full NAS mount configuration is covered in [Guide 02 — NAS Mounts](02-nas-mounts.md).** That guide covers NAS-side NFS export setup, resilient fstab options (automount, nofail, soft mounts), Docker service dependency ordering, ownership setup, and resilience testing. Complete guide 02 before starting guide 03 (Docker).
 
 ---
 
-## 12. Verify the Installation
+## 13. Verify the Installation
 
 Run these checks to ensure everything is set up correctly:
 
 ```bash
-# Display network configuration
+# Verify IP address (should show 172.20.20.5 on enp1s0)
 ip addr show
 
-# Verify static IP is assigned
+# Verify default route (should point to 172.20.20.1)
 ip route show
 
-# Check disk space
+# Verify hostname and FQDN
+hostname && hostname -f
+# → lab
+# → lab.in.alybadawy.com
+
+# Check disk partitions and free space
 df -h
+lsblk -f
 
 # Check memory and swap
 free -h
+swapon --show
 
 # Verify SSH is running
 systemctl status ssh
 
 # Verify firewall is active
 sudo ufw status
-
-# Verify swap is active
-swapon --show
 ```
 
 Expected output:
-- Static IP should be assigned to enp1s0
-- Disk should show the 256GB SSD
-- Memory should match your system (e.g., ~12GB on Beelink Mini S12)
-- Swap should show 8G
-- SSH should be running (active)
-- UFW should show enabled with rules listed
-- NFS mounts (if configured) should show in `df -h`
+
+- `ip addr` shows `172.20.20.5/24` on the Ethernet interface
+- `hostname -f` returns `lab.in.alybadawy.com`
+- Root partition (`/`) shows ~230 GB available on the 256 GB SSD
+- `free -h` shows 8 GB in the Swap row
+- `swapon --show` shows `/swapfile  file  8G`
+- SSH is `active (running)`
+- UFW is enabled with rules listed
 
 ---
 
@@ -344,29 +431,36 @@ The OS is now ready for Docker installation. Proceed to **03-docker-setup.md** t
 ## Troubleshooting
 
 **Problem: Network interface is not `enp1s0`**
+
 ```bash
 ip link show
 ```
+
 Note the actual interface name and update Netplan configuration accordingly.
 
-**Problem: Static IP not applying after `netplan apply`**
-```bash
-# Restart networking service
-sudo systemctl restart systemd-networkd
+**Problem: Server didn't receive `172.20.20.5` from DHCP**
 
-# Check for Netplan errors
-sudo netplan validate
+```bash
+# Check what IP was actually assigned
+ip addr show
+
+# Release and renew the DHCP lease
+sudo dhclient -r && sudo dhclient
 ```
+
+If the wrong IP is assigned, verify the DHCP reservation on the UDR7 — make sure the MAC address in the reservation matches the Beelink's actual MAC (`ip link show enp1s0` to find it).
 
 **Problem: NFS mount fails**
 
 See [Guide 02 — NAS Mounts](02-nas-mounts.md) for full NFS troubleshooting. Quick connectivity check:
+
 ```bash
 ping 172.20.20.10
 showmount -e 172.20.20.10
 ```
 
 **Problem: Firewall blocking SSH**
+
 ```bash
 # If locked out, reboot and press Escape at boot to enter GRUB recovery
 # Or disable UFW temporarily (requires physical access)
@@ -375,6 +469,7 @@ sudo ufw disable
 
 **Problem: Swap not persisting after reboot**
 Verify the `/etc/fstab` line is correct:
+
 ```bash
 cat /etc/fstab | grep swapfile
 # Should return: /swapfile none swap sw 0 0
