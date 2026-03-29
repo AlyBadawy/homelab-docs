@@ -49,7 +49,7 @@ The NAS (currently UGreen, planned migration to UniFi UNAS 4) is responsible for
 
 ### Mount Strategy
 NAS storage is mounted on the homelab server via **NFS (Network File System)** at the following paths:
-- `/mnt/nas/homelab/cloud` — Nextcloud user files and shares
+- `/mnt/nas/homelab/cloudnext` — Nextcloud user files and shares
 - `/mnt/nas/homelab/immich` — Immich photo library
 - `/mnt/nas/homelab/media` — Reserved for future media services
 
@@ -126,7 +126,7 @@ Nextcloud and Immich mount NAS storage via NFS, keeping large binary data off th
 services:
   nextcloud:
     volumes:
-      - /mnt/nas/homelab/cloud:/var/www/html/data
+      - /mnt/nas/homelab/cloudnext:/var/www/html/data
 
   immich-server:
     volumes:
@@ -324,9 +324,9 @@ Add the following to `/etc/fstab` on the homelab server:
 
 ```fstab
 # NAS mounts (adjust IP address and paths for your environment)
-172.20.20.10:/homelab /mnt/nas/homelab/cloud nfs defaults,nofail,noatime 0 0
-172.20.20.10:/homelab /mnt/nas/homelab/immich nfs defaults,nofail,noatime 0 0
-172.20.20.10:/homelab /mnt/nas/homelab/media nfs defaults,nofail,noatime 0 0
+172.20.20.10:/volume1/homelab /mnt/nas/homelab/cloudnext nfs defaults,nofail,noatime 0 0
+172.20.20.10:/volume1/homelab /mnt/nas/homelab/immich nfs defaults,nofail,noatime 0 0
+172.20.20.10:/volume1/homelab /mnt/nas/homelab/media nfs defaults,nofail,noatime 0 0
 ```
 
 **Mount options:**
@@ -359,7 +359,7 @@ services:
       - "80:80"
     volumes:
       - /opt/stacks/nextcloud/config:/var/www/html/config
-      - /mnt/nas/homelab/cloud:/var/www/html/data
+      - /mnt/nas/homelab/cloudnext:/var/www/html/data
     environment:
       - NEXTCLOUD_ADMIN_USER=admin
       - NEXTCLOUD_ADMIN_PASSWORD=secure_password

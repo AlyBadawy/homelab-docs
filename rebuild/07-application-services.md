@@ -8,7 +8,7 @@ Complete guide to deploying Nextcloud, Immich, and Home Assistant with OIDC auth
 - Docker networks: `proxy` and `apps` (pre-created)
 - PostgreSQL and Redis running on `apps` network
 - NPM with wildcard cert for `*.in.alybadawy.com`
-- NAS mounted at `/mnt/nas/` on the host with directories at `/mnt/nas/homelab/cloud`, `/mnt/nas/homelab/immich`, and `/mnt/nas/homelab/media`
+- NAS mounted at `/mnt/nas/` on the host with directories at `/mnt/nas/homelab/cloudnext`, `/mnt/nas/homelab/immich`, and `/mnt/nas/homelab/media`
 - Stack directory structure: `/opt/stacks/apps/`
 
 ---
@@ -21,7 +21,7 @@ Nextcloud is your personal cloud storage and collaboration platform. All users a
 - Domain: `cloud.in.alybadawy.com`
 - Database: PostgreSQL on `apps` network
 - Cache: Redis on `apps` network
-- File storage: `/mnt/nas/homelab/cloud` (persistent NAS mount)
+- File storage: `/mnt/nas/homelab/cloudnext` (persistent NAS mount)
 
 ### Step 1: Create Nextcloud Docker Compose File
 
@@ -45,7 +45,7 @@ services:
       - REDIS_PORT=6379
     volumes:
       - nextcloud_config:/var/www/html
-      - /mnt/nas/homelab/cloud:/var/www/html/data
+      - /mnt/nas/homelab/cloudnext:/var/www/html/data
     networks:
       - proxy
       - apps
@@ -80,10 +80,10 @@ On your NAS or mounted storage:
 
 ```bash
 # Create Nextcloud data directory
-mkdir -p /mnt/nas/homelab/cloud
+mkdir -p /mnt/nas/homelab/cloudnext
 
 # Set permissions (adjust as needed for your setup)
-chmod 755 /mnt/nas/homelab/cloud
+chmod 755 /mnt/nas/homelab/cloudnext
 ```
 
 ### Step 4: Start Nextcloud
@@ -519,7 +519,7 @@ All three should show `STATUS: Up` with no restart loops.
 
 ### Storage & Performance
 
-- [ ] Upload a file to Nextcloud → visible at `/mnt/nas/homelab/cloud`
+- [ ] Upload a file to Nextcloud → visible at `/mnt/nas/homelab/cloudnext`
 - [ ] Upload a photo to Immich → stored at `/mnt/nas/homelab/immich`
 - [ ] Immich ML container not using excessive memory: `docker stats immich-machine-learning`
 

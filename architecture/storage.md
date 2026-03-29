@@ -50,7 +50,7 @@ This is mounted on the homelab at:
 
 | Data Type | Location | Notes |
 |-----------|----------|-------|
-| User files | `/mnt/nas/homelab/cloud/` (NAS) | All documents, photos synced by users |
+| User files | `/mnt/nas/homelab/cloudnext/` (NAS) | All documents, photos synced by users |
 | App config & PHP state | Docker volume `nextcloud_config` (SSD) | Themes, installed apps, settings |
 | Database | PostgreSQL on SSD | Metadata, shares, users |
 | Session cache | Redis on SSD | Ephemeral, rebuilt on restart |
@@ -58,7 +58,7 @@ This is mounted on the homelab at:
 Docker bind mount:
 ```yaml
 volumes:
-  - /mnt/nas/homelab/cloud:/var/www/html/data   # NAS
+  - /mnt/nas/homelab/cloudnext:/var/www/html/data   # NAS
   - nextcloud_config:/var/www/html              # SSD (config/code)
 ```
 
@@ -101,10 +101,10 @@ The `/homelab` NFS export is mounted once at `/mnt/nas/homelab` on the homelab. 
 
 ```bash
 # Single NFS mount
-172.20.20.10:/homelab  →  /mnt/nas/homelab  (mounted once in fstab)
+172.20.20.10:/volume1/homelab  →  /mnt/nas/homelab  (mounted once in fstab)
 
 # Docker isolation via bind mounts (not separate NFS mounts)
-/mnt/nas/homelab/cloud  →  /var/www/html/data (Nextcloud container)
+/mnt/nas/homelab/cloudnext  →  /var/www/html/data (Nextcloud container)
 /mnt/nas/homelab/immich →  /usr/src/app/upload (Immich container)
 ```
 
@@ -226,15 +226,15 @@ Docker containers access NFS shares as specific Unix UIDs. The NAS must allow th
 
 | Service | Container UID | NAS Directory | Required Permission |
 |---------|--------------|---------------|---------------------|
-| Nextcloud | `www-data` (UID 33) | `/homelab/cloud` | UID 33 owns the directory, `rwx` |
+| Nextcloud | `www-data` (UID 33) | `/homelab/cloudnext` | UID 33 owns the directory, `rwx` |
 | Immich | `node` (UID 1000) | `/homelab/immich` | UID 1000 owns the directory, `rwx` |
 
 On the NAS, before first use:
 ```bash
 # Run on the NAS (via SSH or NAS terminal)
-chown -R 33:33 /homelab/cloud        # www-data for Nextcloud
+chown -R 33:33 /homelab/cloudnext        # www-data for Nextcloud
 chown -R 1000:1000 /homelab/immich   # node for Immich
-chmod -R 755 /homelab/cloud /homelab/immich
+chmod -R 755 /homelab/cloudnext /homelab/immich
 ```
 
 Alternatively, configure the NAS NFS export with `all_squash,anonuid=1000,anongid=1000` and run both containers as UID 1000 — but this requires overriding the Nextcloud container's UID, which adds complexity.

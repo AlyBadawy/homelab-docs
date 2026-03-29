@@ -114,12 +114,12 @@ NFS export (single entry on NAS):
 
 Homelab mount (single fstab entry):
 ```
-172.20.20.10:/homelab  /mnt/nas/homelab  nfs4  _netdev,nofail,x-systemd.automount,...  0 0
+172.20.20.10:/volume1/homelab  /mnt/nas/homelab  nfs4  _netdev,nofail,x-systemd.automount,...  0 0
 ```
 
 Docker bind mounts reference subfolders within the single mount:
 ```
-/mnt/nas/homelab/cloud   → Nextcloud container data directory
+/mnt/nas/homelab/cloudnext   → Nextcloud container data directory
 /mnt/nas/homelab/immich  → Immich container upload directory
 /mnt/nas/homelab/media   → (future)
 ```

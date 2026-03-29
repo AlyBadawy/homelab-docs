@@ -135,7 +135,33 @@ Expected output: `Active: active (running)`
 
 ---
 
-## 3. Create Docker Networks
+## 3. Configure Docker Network Dependency
+
+Docker must start after the network is fully up so that NFS automount units can function when containers first access NAS paths. By default, Ubuntu's Docker service depends on `network.target`, which is weaker than `network-online.target`. Strengthen this:
+
+```bash
+sudo mkdir -p /etc/systemd/system/docker.service.d
+sudo tee /etc/systemd/system/docker.service.d/network-wait.conf > /dev/null << 'EOF'
+[Unit]
+After=network-online.target
+Wants=network-online.target
+EOF
+
+sudo systemctl daemon-reload
+sudo systemctl restart docker
+```
+
+This ensures Docker (and therefore all containers) only starts once the network stack is fully operational — including DNS resolution and routing to the NAS subnet.
+
+Verify the override is active:
+
+```bash
+systemctl show docker | grep -E "After|Wants" | tr ' ' '\n' | grep network
+```
+
+---
+
+## 4. Create Docker Networks
 
 Create the three bridge networks for service isolation and communication:
 
@@ -175,7 +201,7 @@ xxxxxxxx       none      null      local
 
 ---
 
-## 4. Create Stack Directory Structure
+## 5. Create Stack Directory Structure
 
 Create the organized directory hierarchy for all service docker-compose files:
 
@@ -248,7 +274,7 @@ ls -ld /opt/stacks
 
 ---
 
-## 5. Verify Docker Compose v2 Functionality
+## 6. Verify Docker Compose v2 Functionality
 
 Test Docker Compose with a simple service:
 
@@ -281,7 +307,7 @@ Expected output: Should show "Docker Compose is working!" without errors.
 
 ---
 
-## 6. Enable Docker Restart Policy
+## 7. Enable Docker Restart Policy
 
 To ensure Docker services survive system reboots and daemon restarts, configure the restart policy at container creation time.
 
@@ -319,7 +345,7 @@ For homelab services, `restart: always` is recommended for critical infrastructu
 
 ---
 
-## 7. Configure Log Rotation
+## 8. Configure Log Rotation
 
 Verify Docker's log rotation is working correctly:
 
@@ -341,7 +367,7 @@ The `daemon.json` configuration (Step 2) ensures logs don't consume excessive di
 
 ---
 
-## 8. Optional: Configure Docker Registry Mirror
+## 9. Optional: Configure Docker Registry Mirror
 
 If you're behind a slow/blocked Docker Hub connection, configure a registry mirror (e.g., Aliyun, DaoCloud, or your own):
 
@@ -367,7 +393,7 @@ sudo systemctl restart docker
 
 ---
 
-## 9. Set Up Stack Deployment with Portainer
+## 10. Set Up Stack Deployment with Portainer
 
 Once Docker is running, you'll deploy services in this order:
 
@@ -391,7 +417,7 @@ Each docker-compose.yml in `/opt/stacks/*/` can be deployed as a Portainer stack
 
 ---
 
-## 10. Verify Docker and Stack Readiness
+## 11. Verify Docker and Stack Readiness
 
 Run these final checks before deploying services:
 

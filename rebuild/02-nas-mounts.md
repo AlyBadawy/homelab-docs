@@ -8,14 +8,14 @@
 
 ## Overview
 
-| What | Where |
-|------|-------|
-| NAS IP | `172.20.20.10` (Servers VLAN) |
-| NAS shared folder | `homelab` (contains `cloud/`, `immich/`, `media/` subfolders) |
-| NAS export | `/homelab` |
-| Homelab mount point | `/mnt/nas/homelab` |
-| Protocol | NFSv4 |
-| Mount strategy | `x-systemd.automount` — lazy mount, survives NAS downtime at boot |
+| What                | Where                                                             |
+| ------------------- | ----------------------------------------------------------------- |
+| NAS IP              | `172.20.20.10` (Servers VLAN)                                     |
+| NAS shared folder   | `homelab` (contains `cloud/`, `immich/`, `media/` subfolders)     |
+| NAS export          | `/homelab`                                                        |
+| Homelab mount point | `/mnt/nas/homelab`                                                |
+| Protocol            | NFSv3                                                             |
+| Mount strategy      | `x-systemd.automount` — lazy mount, survives NAS downtime at boot |
 
 ---
 
@@ -27,37 +27,48 @@
 
 Create one shared folder on the NAS:
 
-| Folder Name | Purpose |
-|-------------|---------|
-| `homelab` | Parent folder for all homelab storage |
+| Folder Name | Purpose                               |
+| ----------- | ------------------------------------- |
+| `homelab`   | Parent folder for all homelab storage |
 
 After the first mount (or via the NAS admin UI), create three subfolders within `homelab`:
 
-| Subfolder | Purpose |
-|-----------|---------|
-| `homelab/cloud` | Nextcloud user data |
-| `homelab/immich` | Immich photo/video library |
-| `homelab/media` | General media (future use) |
+| Subfolder           | Purpose                    |
+| ------------------- | -------------------------- |
+| `homelab/cloudnext` | Nextcloud user data        |
+| `homelab/immich`    | Immich photo/video library |
+| `homelab/media`     | General media (future use) |
 
 Leave permissions at default for now — you'll set ownership after the first mount.
 
 ### 1.2 Enable NFS Service
 
-In the NAS admin panel, navigate to **Services → NFS** (or **File Services → NFS**) and enable the NFS server. Enable **NFSv4** specifically.
+In the NAS admin panel, navigate to **Services → NFS** (or **File Services → NFS**) and enable the NFS server. Enable **NFSv3** (the UGreen NAS does not offer NFSv4).
 
 ### 1.3 Configure NFS Export
 
 Add one NFS rule for the `homelab` shared folder with the following settings:
 
-| Setting | Value |
-|---------|-------|
-| **Allowed host** | `172.20.20.5` (homelab only) |
-| **Permissions** | Read/Write |
-| **Sync** | Synchronous |
-| **Root squash** | No root squash |
-| **Subtree check** | No subtree check |
+| Setting           | Value                        |
+| ----------------- | ---------------------------- |
+| **Allowed host**  | `172.20.20.5` (homelab only) |
+| **Permissions**   | Read/Write                   |
+| **Sync**          | Synchronous                  |
+| **Root squash**   | No root squash               |
+| **Subtree check** | No subtree check             |
 
 > **On `no_root_squash`:** Normally NFS maps root (UID 0) inside a container to an unprivileged `nobody` user on the NAS, which breaks Docker container writes. Since access is restricted to `172.20.20.5` on a private VLAN, disabling root squash is a reasonable trade-off. The alternative is configuring UID/GID mappings, which adds complexity.
+
+**UGreen NAS NFS dialog field values:**
+
+| Field                  | Value            | Notes                                                          |
+| ---------------------- | ---------------- | -------------------------------------------------------------- |
+| **Server address**     | `172.20.20.5`    | Homelab IP — restricts access to homelab only                  |
+| **Permissions**        | Read/Write       | Required for Docker containers to write data                   |
+| **Squash**             | No mapping       | Equivalent to `no_root_squash` — needed for container writes   |
+| **Security**           | AUTH_SYS         | Standard Unix UID/GID auth — correct, leave as-is              |
+| **Async**              | Unchecked (sync) | Safer — data confirmed written to NAS before ACK               |
+| **Unprivileged ports** | Unchecked        | Linux NFS clients use privileged ports (below 1024) by default |
 
 If you're configuring via the NAS terminal (SSH), the `/etc/exports` entry looks like:
 
@@ -66,6 +77,7 @@ If you're configuring via the NAS terminal (SSH), the `/etc/exports` entry looks
 ```
 
 After saving, apply the exports:
+
 ```bash
 # On the NAS (if SSH access available)
 sudo exportfs -ra
@@ -80,6 +92,7 @@ showmount -e 172.20.20.10
 ```
 
 Expected output:
+
 ```
 Export list for 172.20.20.10:
 /homelab   172.20.20.5
@@ -108,12 +121,13 @@ sudo mkdir -p /mnt/nas/homelab
 Before adding to fstab, verify the share mounts manually:
 
 ```bash
-sudo mount -t nfs4 172.20.20.10:/homelab /mnt/nas/homelab
+sudo mount -t nfs 172.20.20.10:/volume1/homelab /mnt/nas/homelab
 ls /mnt/nas/homelab        # should show cloud, immich, media subfolders
 sudo umount /mnt/nas/homelab
 ```
 
 If the manual mount fails, resolve it before continuing. Common issues:
+
 - NFS service not started on NAS
 - Export not configured for `172.20.20.5`
 - NAS firewall blocking port 2049
@@ -121,6 +135,7 @@ If the manual mount fails, resolve it before continuing. Common issues:
 ### 2.4 Add Persistent fstab Entry
 
 Open fstab:
+
 ```bash
 sudo nano /etc/fstab
 ```
@@ -129,23 +144,23 @@ Append this line at the bottom:
 
 ```
 # NAS NFS mount (172.20.20.10 — Servers VLAN)
-172.20.20.10:/homelab  /mnt/nas/homelab  nfs4  _netdev,nofail,x-systemd.automount,x-systemd.mount-timeout=30,soft,timeo=100,retrans=3,rsize=131072,wsize=131072,noatime  0 0
+172.20.20.10:/volume1/homelab  /mnt/nas/homelab  nfs  _netdev,nofail,x-systemd.automount,x-systemd.mount-timeout=30,soft,timeo=100,retrans=3,rsize=131072,wsize=131072,noatime  0 0
 ```
 
 **What each option does:**
 
-| Option | Effect |
-|--------|--------|
-| `nfs4` | Explicitly use NFSv4 |
-| `_netdev` | Defer mount until network is up (critical for boot order) |
-| `nofail` | If NAS is unreachable at boot, continue booting — don't hang |
-| `x-systemd.automount` | Register a lazy automount unit; actual connection made on first access |
-| `x-systemd.mount-timeout=30` | If mount attempt takes more than 30 seconds, fail gracefully |
-| `soft` | NFS I/O operations return an error after timeout (vs. blocking forever) |
-| `timeo=100` | NFS client waits 10 seconds per operation before retrying (units of 0.1s) |
-| `retrans=3` | Retry a failed NFS operation 3 times before giving up |
-| `rsize=131072,wsize=131072` | 128 KB transfer blocks — well-suited for 2.5 GbE |
-| `noatime` | Do not update file access timestamps — reduces unnecessary NAS writes |
+| Option                       | Effect                                                                    |
+| ---------------------------- | ------------------------------------------------------------------------- |
+| `nfs`                        | Use NFSv3 (UGreen NAS does not support NFSv4)                             |
+| `_netdev`                    | Defer mount until network is up (critical for boot order)                 |
+| `nofail`                     | If NAS is unreachable at boot, continue booting — don't hang              |
+| `x-systemd.automount`        | Register a lazy automount unit; actual connection made on first access    |
+| `x-systemd.mount-timeout=30` | If mount attempt takes more than 30 seconds, fail gracefully              |
+| `soft`                       | NFS I/O operations return an error after timeout (vs. blocking forever)   |
+| `timeo=100`                  | NFS client waits 10 seconds per operation before retrying (units of 0.1s) |
+| `retrans=3`                  | Retry a failed NFS operation 3 times before giving up                     |
+| `rsize=131072,wsize=131072`  | 128 KB transfer blocks — well-suited for 2.5 GbE                          |
+| `noatime`                    | Do not update file access timestamps — reduces unnecessary NAS writes     |
 
 ### 2.5 Reload systemd and Activate Automount
 
@@ -176,13 +191,13 @@ Verify the mount is live:
 ```bash
 mount | grep nfs
 # Expected output:
-# 172.20.20.10:/homelab on /mnt/nas/homelab type nfs4 (rw,relatime,...)
+# 172.20.20.10:/volume1/homelab on /mnt/nas/homelab type nfs (rw,relatime,...)
 ```
 
 Verify subfolders exist:
 
 ```bash
-ls /mnt/nas/homelab/cloud /mnt/nas/homelab/immich /mnt/nas/homelab/media
+ls /mnt/nas/homelab/cloudnext /mnt/nas/homelab/immich /mnt/nas/homelab/media
 ```
 
 Check disk space is visible from the NAS:
@@ -198,15 +213,15 @@ df -h /mnt/nas/homelab
 Now that the share is mounted, set the correct ownership so Docker containers can write to their respective subfolders. First, create the subfolders if they don't already exist:
 
 ```bash
-sudo mkdir -p /mnt/nas/homelab/{cloud,immich,media}
+sudo mkdir -p /mnt/nas/homelab/{cloudnext,immich,media}
 ```
 
 Then set ownership:
 
 ```bash
 # Nextcloud container writes as www-data (UID 33)
-sudo chown -R 33:33 /mnt/nas/homelab/cloud
-sudo chmod -R 755 /mnt/nas/homelab/cloud
+sudo chown -R 33:33 /mnt/nas/homelab/cloudnext
+sudo chmod -R 755 /mnt/nas/homelab/cloudnext
 
 # Immich container writes as UID 1000 (node user)
 sudo chown -R 1000:1000 /mnt/nas/homelab/immich
@@ -225,43 +240,13 @@ ls -la /mnt/nas/homelab/
 
 ---
 
-## Part 4 — Docker Dependency on Network
-
-Docker must start after the network is fully up so that automount units can function when containers first access NAS paths. By default Ubuntu's Docker service depends on `network.target`, which is weaker than `network-online.target`. Strengthen this:
-
-```bash
-sudo mkdir -p /etc/systemd/system/docker.service.d
-sudo tee /etc/systemd/system/docker.service.d/network-wait.conf > /dev/null << 'EOF'
-[Unit]
-After=network-online.target
-Wants=network-online.target
-EOF
-
-sudo systemctl daemon-reload
-sudo systemctl restart docker
-```
-
-This ensures Docker (and therefore all containers) only starts once the network stack is fully operational — including DNS resolution and routing to the NAS subnet.
-
-Verify the override is active:
-
-```bash
-systemctl show docker | grep -E "After|Wants" | tr ' ' '\n' | grep network
-```
-
----
-
-## Part 5 — Resilience Testing
+## Part 4 — Resilience Testing
 
 ### Test 1: Boot Without NAS
 
 1. Shut down the NAS
 2. Reboot the homelab
-3. Confirm the homelab boots fully and Docker starts:
-   ```bash
-   systemctl status docker
-   docker ps
-   ```
+3. Confirm the homelab boots
 4. Confirm the automount unit is registered (not mounted):
    ```bash
    systemctl status mnt-nas-homelab.automount
@@ -285,26 +270,10 @@ systemctl show docker | grep -E "After|Wants" | tr ' ' '\n' | grep network
    ```bash
    mount | grep nfs
    ```
-5. Restart any affected containers:
-   ```bash
-   docker restart nextcloud immich-server
-   ```
-
-### Test 3: NAS Goes Down During Operation
-
-1. While Nextcloud/Immich are running, shut down the NAS
-2. Observe: containers stay running, but file operations fail
-3. Check container logs:
-   ```bash
-   docker logs nextcloud --tail 20
-   docker logs immich-server --tail 20
-   ```
-4. Confirm the homelab itself is unaffected (auth, dashboard, HA still work)
-5. Bring NAS back up, re-trigger mount, restart containers
 
 ---
 
-## Part 6 — Monitoring Mounts
+## Part 5 — Monitoring Mounts
 
 Add these checks to your routine health checks (or Netdata alerts):
 
@@ -320,7 +289,7 @@ fi
 Verify subfolder accessibility:
 
 ```bash
-ls /mnt/nas/homelab/cloud /mnt/nas/homelab/immich
+ls /mnt/nas/homelab/cloudnext /mnt/nas/homelab/immich
 ```
 
 Check automount unit status:
@@ -354,19 +323,20 @@ Fix: Double-check fstab entry has both `nofail` and `_netdev`. Run `sudo mount -
 Cause: `nfs-common` not installed.
 
 Fix:
+
 ```bash
 sudo apt install -y nfs-common
 ```
 
 ---
 
-### Permission denied when container writes to NAS
+### Permission denied writing to NAS subfolders
 
-Symptom: Container logs show `Permission denied` on `/var/www/html/data` (Nextcloud) or `/usr/src/app/upload` (Immich).
+Symptom: `Permission denied` when writing to `/mnt/nas/homelab/cloudnext` or `/mnt/nas/homelab/immich`.
 
-Cause: NAS file ownership doesn't match the container UID.
+Cause: NAS file ownership doesn't match the expected UID.
 
-Fix: Re-run the ownership commands from Part 3, or on the NAS side set `all_squash,anonuid=33,anongid=33` for Nextcloud.
+Fix: Re-run the ownership commands from Part 3.
 
 ---
 
@@ -404,7 +374,7 @@ ls /mnt/nas/homelab  # this triggers the fresh mount attempt
 # Format:
 # <server>:<export>  <mountpoint>  <fstype>  <options>  <dump>  <pass>
 #
-172.20.20.10:/homelab  /mnt/nas/homelab  nfs4  _netdev,nofail,x-systemd.automount,x-systemd.mount-timeout=30,soft,timeo=100,retrans=3,rsize=131072,wsize=131072,noatime  0 0
+172.20.20.10:/volume1/homelab  /mnt/nas/homelab  nfs  _netdev,nofail,x-systemd.automount,x-systemd.mount-timeout=30,soft,timeo=100,retrans=3,rsize=131072,wsize=131072,noatime  0 0
 ```
 
 > ⚠️ After any fstab change, always run `sudo mount -fav` (dry run) before `sudo mount -a` (live) to catch typos that could make the system unbootable.
