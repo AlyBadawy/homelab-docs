@@ -4,11 +4,11 @@ Complete guide to deploying Nextcloud, Immich, and Home Assistant with OIDC auth
 
 ## Prerequisites
 
-- Identity stack deployed (LLDAP + Authentik): See **05-identity-stack.md**
+- Identity stack deployed (LLDAP + Authentik): See **06-identity-stack.md**
 - Docker networks: `proxy` and `apps` (pre-created)
 - PostgreSQL and Redis running on `apps` network
-- NPM with wildcard cert for `*.inside.alybadawy.com`
-- NAS mounted at `/mnt/nas/` on the host
+- NPM with wildcard cert for `*.in.alybadawy.com`
+- NAS mounted at `/mnt/nas/` on the host with directories at `/mnt/nas/homelab/cloud`, `/mnt/nas/homelab/immich`, and `/mnt/nas/homelab/media`
 - Stack directory structure: `/opt/stacks/apps/`
 
 ---
@@ -18,10 +18,10 @@ Complete guide to deploying Nextcloud, Immich, and Home Assistant with OIDC auth
 Nextcloud is your personal cloud storage and collaboration platform. All users authenticate through Authentik's OIDC provider.
 
 **Nextcloud Configuration:**
-- Domain: `nextcloud.inside.alybadawy.com`
+- Domain: `cloud.in.alybadawy.com`
 - Database: PostgreSQL on `apps` network
 - Cache: Redis on `apps` network
-- File storage: `/mnt/nas/nextcloud/data` (persistent NAS mount)
+- File storage: `/mnt/nas/homelab/cloud` (persistent NAS mount)
 
 ### Step 1: Create Nextcloud Docker Compose File
 
@@ -40,12 +40,12 @@ services:
       - POSTGRES_PASSWORD=${NEXTCLOUD_DB_PASSWORD}
       - NEXTCLOUD_ADMIN_USER=${NEXTCLOUD_ADMIN_USER}
       - NEXTCLOUD_ADMIN_PASSWORD=${NEXTCLOUD_ADMIN_PASSWORD}
-      - NEXTCLOUD_TRUSTED_DOMAINS=nextcloud.inside.alybadawy.com
+      - NEXTCLOUD_TRUSTED_DOMAINS=cloud.in.alybadawy.com
       - REDIS_HOST=redis
       - REDIS_PORT=6379
     volumes:
       - nextcloud_config:/var/www/html
-      - /mnt/nas/nextcloud/data:/var/www/html/data
+      - /mnt/nas/homelab/cloud:/var/www/html/data
     networks:
       - proxy
       - apps
@@ -80,10 +80,10 @@ On your NAS or mounted storage:
 
 ```bash
 # Create Nextcloud data directory
-mkdir -p /mnt/nas/nextcloud/data
+mkdir -p /mnt/nas/homelab/cloud
 
 # Set permissions (adjust as needed for your setup)
-chmod 755 /mnt/nas/nextcloud/data
+chmod 755 /mnt/nas/homelab/cloud
 ```
 
 ### Step 4: Start Nextcloud
@@ -102,11 +102,11 @@ Watch for: `New nextcloud instance initialized`
 
 In Nginx Proxy Manager, add a new proxy host:
 
-- **Domain Name:** `nextcloud.inside.alybadawy.com`
+- **Domain Name:** `cloud.in.alybadawy.com`
 - **Scheme:** `http`
 - **Forward Hostname/IP:** `nextcloud`
 - **Forward Port:** `80`
-- **SSL Certificate:** Wildcard cert for `inside.alybadawy.com`
+- **SSL Certificate:** Wildcard cert for `in.alybadawy.com`
 - **Force SSL:** On
 - **HTTP/2 Support:** On
 - **Websockets Support:** On
@@ -126,7 +126,7 @@ These settings allow large file uploads and long-running sync operations.
 
 ### Step 6: Install Nextcloud OIDC App
 
-1. Access `https://nextcloud.inside.alybadawy.com`
+1. Access `https://cloud.in.alybadawy.com`
 2. Login with your initial admin credentials (from `.env`)
 3. Click the admin avatar (top right) → **Administration**
 4. Go to **Apps** → **Search for apps**
@@ -140,7 +140,7 @@ In **Authentik Admin Interface** → **Applications** → **Providers**:
 1. Click **Create** → **OAuth2/OpenID Connect Provider**
 2. **Name:** `Nextcloud OIDC`
 3. **Client Type:** `Confidential`
-4. **Redirect URIs:** `https://nextcloud.inside.alybadawy.com/apps/user_oidc/code`
+4. **Redirect URIs:** `https://cloud.in.alybadawy.com/apps/user_oidc/code`
 5. Leave other settings at defaults
 6. Click **Create**
 7. **Copy:**
@@ -157,7 +157,7 @@ Back in Nextcloud:
    - **Provider:** `Authentik` (or generic description)
    - **Client ID:** (paste from Authentik)
    - **Client Secret:** (paste from Authentik)
-   - **Discovery URL:** `https://auth.inside.alybadawy.com/application/o/nextcloud/.well-known/openid-configuration`
+   - **Discovery URL:** `https://auth.in.alybadawy.com/application/o/nextcloud/.well-known/openid-configuration`
 
 4. Click **Verify and save**
 
@@ -191,10 +191,10 @@ Nextcloud is now configured with OIDC authentication. User accounts are automati
 Immich is your photo and video library with AI-powered features. It has its own PostgreSQL instance (with pgvector support) and machine learning container.
 
 **Immich Configuration:**
-- Domain: `immich.inside.alybadawy.com`
+- Domain: `photo.in.alybadawy.com`
 - Database: Dedicated PostgreSQL with pgvector extension
 - ML Container: Runs facial recognition and object detection
-- Library: `/mnt/nas/immich/library` (NAS mount for all media)
+- Library: `/mnt/nas/homelab/immich` (NAS mount for all media)
 
 ### Step 1: Create Immich Docker Compose File
 
@@ -207,7 +207,7 @@ services:
     container_name: immich-server
     restart: unless-stopped
     volumes:
-      - /mnt/nas/immich/library:/usr/src/app/upload
+      - /mnt/nas/homelab/immich:/usr/src/app/upload
       - /etc/localtime:/etc/localtime:ro
     environment:
       - DB_HOSTNAME=immich-postgres
@@ -274,8 +274,8 @@ IMMICH_DB_PASSWORD=CHANGE_ME_immich_db_password
 ### Step 3: Prepare NAS Directory
 
 ```bash
-mkdir -p /mnt/nas/immich/library
-chmod 755 /mnt/nas/immich/library
+mkdir -p /mnt/nas/homelab/immich
+chmod 755 /mnt/nas/homelab/immich
 ```
 
 ### Step 4: Start Immich Services
@@ -294,7 +294,7 @@ Watch for: `Immich Server is running...`
 
 In Nginx Proxy Manager:
 
-- **Domain Name:** `immich.inside.alybadawy.com`
+- **Domain Name:** `photo.in.alybadawy.com`
 - **Scheme:** `http`
 - **Forward Hostname/IP:** `immich-server`
 - **Forward Port:** `2283`
@@ -324,7 +324,7 @@ In **Authentik Admin** → **Applications** → **Providers**:
 1. Click **Create** → **OAuth2/OpenID Connect Provider**
 2. **Name:** `Immich OIDC`
 3. **Client Type:** `Confidential`
-4. **Redirect URIs:** `https://immich.inside.alybadawy.com/auth/callback`
+4. **Redirect URIs:** `https://photo.in.alybadawy.com/auth/callback`
 5. Click **Create**
 6. **Copy:**
    - Client ID
@@ -342,13 +342,13 @@ In **Authentik Admin** → **Applications** → **Applications**:
 
 ### Step 8: Enable OIDC in Immich
 
-1. Access `https://immich.inside.alybadawy.com`
+1. Access `https://photo.in.alybadawy.com`
 2. You'll be redirected to setup. Create an initial admin account (temporary).
 3. Go to **Administration** (settings icon in top right)
 4. Navigate to **User Management** → **Authentication Settings** → **OAuth**
 5. **Enable OAuth:** Toggle ON
 6. Fill in:
-   - **Issuer URL:** `https://auth.inside.alybadawy.com/application/o/immich/`
+   - **Issuer URL:** `https://auth.in.alybadawy.com/application/o/immich/`
    - **Client ID:** (from Authentik)
    - **Client Secret:** (from Authentik)
    - **Scope:** `openid profile email` (should be auto-filled)
@@ -368,7 +368,7 @@ In **Authentik Admin** → **Applications** → **Applications**:
 Home Assistant automates your smart home. It uses host network mode for device discovery, and optionally connects to Authentik for SSO.
 
 **Home Assistant Configuration:**
-- Domain: `ha.inside.alybadawy.com`
+- Domain: `ha.in.alybadawy.com`
 - Network Mode: `host` (required for mDNS discovery of smart devices)
 - Config storage: Docker volume
 - Optional: OIDC login through Authentik
@@ -413,7 +413,7 @@ Watch for: `Home Assistant started at` or similar.
 
 ⚠️ **Important:** Because HA uses host network mode, access it directly (not through NPM) for initial setup:
 
-1. Open `http://<172.20.20.15>:8123` in your browser
+1. Open `http://<172.20.20.5>:8123` in your browser
 2. Complete the onboarding wizard
 3. Create your admin account (this will be replaced by OIDC)
 4. Finish onboarding
@@ -422,7 +422,7 @@ Watch for: `Home Assistant started at` or similar.
 
 Back in **Nginx Proxy Manager**:
 
-- **Domain Name:** `ha.inside.alybadawy.com`
+- **Domain Name:** `ha.in.alybadawy.com`
 - **Scheme:** `http`
 - **Forward Hostname/IP:** `127.0.0.1`
 - **Forward Port:** `8123`
@@ -451,7 +451,7 @@ Then restart HA:
 docker compose -f /opt/stacks/apps/homeassistant/docker-compose.yml restart homeassistant
 ```
 
-Now you can access Home Assistant through NPM at `https://ha.inside.alybadawy.com`
+Now you can access Home Assistant through NPM at `https://ha.in.alybadawy.com`
 
 ### Step 6 (Optional): Enable OIDC for Home Assistant
 
@@ -494,12 +494,12 @@ After deploying all three applications, use this checklist to verify everything 
 
 ### Access & SSL
 
-- [ ] `https://npm.inside.alybadawy.com` — NPM accessible, cert valid
-- [ ] `https://auth.inside.alybadawy.com` — Authentik login page loads
-- [ ] `https://lldap.inside.alybadawy.com` — LLDAP web UI loads
-- [ ] `https://nextcloud.inside.alybadawy.com` — Nextcloud loads
-- [ ] `https://immich.inside.alybadawy.com` — Immich loads
-- [ ] `https://ha.inside.alybadawy.com` — Home Assistant loads
+- [ ] `https://proxy.in.alybadawy.com` — NPM accessible, cert valid
+- [ ] `https://auth.in.alybadawy.com` — Authentik login page loads
+- [ ] `https://lldap.in.alybadawy.com` — LLDAP web UI loads
+- [ ] `https://cloud.in.alybadawy.com` — Nextcloud loads
+- [ ] `https://photo.in.alybadawy.com` — Immich loads
+- [ ] `https://ha.in.alybadawy.com` — Home Assistant loads
 
 ### Authentication
 
@@ -519,8 +519,8 @@ All three should show `STATUS: Up` with no restart loops.
 
 ### Storage & Performance
 
-- [ ] Upload a file to Nextcloud → visible at `/mnt/nas/nextcloud/data`
-- [ ] Upload a photo to Immich → stored at `/mnt/nas/immich/library`
+- [ ] Upload a file to Nextcloud → visible at `/mnt/nas/homelab/cloud`
+- [ ] Upload a photo to Immich → stored at `/mnt/nas/homelab/immich`
 - [ ] Immich ML container not using excessive memory: `docker stats immich-machine-learning`
 
 ### External Access (VPN)
@@ -549,11 +549,11 @@ docker exec nextcloud php occ app:install user_oidc
 **"Discovery URL returned an error" in Nextcloud settings:**
 ```bash
 # Test connectivity from Nextcloud container
-docker exec nextcloud curl -v https://auth.inside.alybadawy.com/application/o/nextcloud/.well-known/openid-configuration
+docker exec nextcloud curl -v https://auth.in.alybadawy.com/application/o/nextcloud/.well-known/openid-configuration
 ```
 
 **Users not syncing from LDAP:**
-- Verify LDAP sync is working in Authentik (05-identity-stack.md troubleshooting)
+- Verify LDAP sync is working in Authentik (06-identity-stack.md troubleshooting)
 - Force LDAP resync in Authentik Admin panel
 
 ### Immich Issues
@@ -578,7 +578,7 @@ docker compose restart immich-machine-learning
 
 **OAuth not working:**
 - Verify Client Secret is correct (copy-paste carefully)
-- Check Issuer URL exactly matches: `https://auth.inside.alybadawy.com/application/o/immich/`
+- Check Issuer URL exactly matches: `https://auth.in.alybadawy.com/application/o/immich/`
 
 ### Home Assistant Issues
 

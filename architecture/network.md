@@ -21,7 +21,7 @@ The home network uses UniFi VLAN segmentation for isolation between device class
 |--------|----|-------|
 | UDR7 (Servers VLAN gateway) | 172.20.20.1 | Also the DNS server for this VLAN |
 | NAS (UGreen → UniFi UNAS 4) | 172.20.20.10 | NFS exports for Nextcloud + Immich |
-| Homelab server (Beelink) | 172.20.20.15 | Static IP — all services live here |
+| Homelab server (Beelink) | 172.20.20.5 | Static IP — hostname `lab.in.alybadawy.com` |
 
 > **Why Servers VLAN?** Placing both the homelab and NAS on the same VLAN means NFS traffic between them stays entirely within VLAN 20 at LAN speeds, without traversing firewall rules between VLANs. Personal and IoT devices access services through NPM via inter-VLAN routing controlled by the UDR7 firewall.
 
@@ -34,14 +34,14 @@ The home network uses UniFi VLAN segmentation for isolation between device class
 The public DNS records allow external Let's Encrypt validation and map the domain to the home network:
 
 ```
-inside.alybadawy.com          A record    → UDR7 public IP
+in.alybadawy.com          A record    → UDR7 public IP
                                             (auto-updated by user script)
 
-*.inside.alybadawy.com        CNAME       → inside.alybadawy.com
+*.in.alybadawy.com        CNAME       → in.alybadawy.com
 ```
 
 - The A record points to the UDR7's public IP, which is dynamic and updated periodically by a script
-- The wildcard CNAME allows any subdomain (immich.inside.alybadawy.com, nextcloud.inside.alybadawy.com, etc.) to resolve through the same public A record
+- The wildcard CNAME allows any subdomain (photo.in.alybadawy.com, cloud.in.alybadawy.com, etc.) to resolve through the same public A record
 - Let's Encrypt DNS-01 challenges use the Vercel API to validate domain ownership for wildcard cert issuance
 
 ### Internal DNS (UniFi UDR7 Built-in DNS)
@@ -49,16 +49,14 @@ inside.alybadawy.com          A record    → UDR7 public IP
 The UDR7 DNS server overrides public DNS for internal clients, ensuring direct routing without hairpin NAT:
 
 ```
-inside.alybadawy.com          A record    → UDR7 internal LAN IP
-                                            (e.g., 172.20.20.1)
-
-*.inside.alybadawy.com        A record    → Homelab server LAN IP
-                                            (e.g., 172.20.20.15)
+in.alybadawy.com          A record    → 172.20.20.1  (UDR7 Servers VLAN gateway)
+lab.in.alybadawy.com      A record    → 172.20.20.5  (homelab server hostname)
+*.in.alybadawy.com        A record    → 172.20.20.5  (wildcard → all services on homelab)
 ```
 
 - Internal clients query UDR7's DNS
-- Requests for `inside.alybadawy.com` resolve to the UDR7 itself (gateway)
-- Requests for subdomains (e.g., `immich.inside.alybadawy.com`) resolve directly to the homelab server
+- Requests for `in.alybadawy.com` resolve to the UDR7 itself (gateway)
+- Requests for subdomains (e.g., `photo.in.alybadawy.com`) resolve directly to the homelab server
 - This avoids "hairpin NAT" — clients don't need to loop traffic through the internet gateway
 
 ### Why This Two-Level Setup Works for TLS
@@ -66,17 +64,17 @@ inside.alybadawy.com          A record    → UDR7 internal LAN IP
 1. **Let's Encrypt Validation**
    - acme.sh (running on homelab) performs DNS-01 challenge via Vercel API
    - Vercel API updates the public A and CNAME records
-   - Let's Encrypt validates ownership and issues the wildcard cert for `*.inside.alybadawy.com`
+   - Let's Encrypt validates ownership and issues the wildcard cert for `*.in.alybadawy.com`
 
 2. **Internal Client Resolution**
    - LAN clients query UDR7 DNS
-   - `immich.inside.alybadawy.com` resolves to homelab server IP (172.20.20.15)
+   - `photo.in.alybadawy.com` resolves to homelab server IP (172.20.20.5)
    - Request hits NPM directly on the local network (no internet roundtrip)
 
 3. **TLS Validity**
    - The wildcard cert is publicly signed (by Let's Encrypt)
    - All major browsers and OS trust Let's Encrypt as a root CA
-   - Clients connecting to `immich.inside.alybadawy.com` receive a valid cert matching the hostname
+   - Clients connecting to `photo.in.alybadawy.com` receive a valid cert matching the hostname
    - No SSL warnings or browser errors
 
 4. **External/VPN Access**
@@ -103,9 +101,9 @@ VPN Client (remote)
         |
         → Receives a LAN IP on the Personal VLAN (172.20.10.0/24)
         |
-        → Queries UDR7 DNS for *.inside.alybadawy.com
+        → Queries UDR7 DNS for *.in.alybadawy.com
         |
-        → Resolves to homelab IP (172.20.20.15)
+        → Resolves to homelab IP (172.20.20.5)
         |
         → Connects to NPM on homelab, same as LAN client
 ```
@@ -303,8 +301,8 @@ services:
 ### Inbound (External/VPN Client → Homelab Service)
 
 ```
-1. Client queries UDR7 DNS for immich.inside.alybadawy.com
-2. UDR7 responds with homelab IP (172.20.20.15)
+1. Client queries UDR7 DNS for photo.in.alybadawy.com
+2. UDR7 responds with homelab IP (172.20.20.5)
 3. Client initiates TLS to NPM (homelab:443)
 4. NPM terminates TLS, checks Host header
 5. NPM routes to Immich container on apps network
@@ -328,7 +326,7 @@ Example: Immich Server → PostgreSQL
 ### Service → Authentication Check
 
 ```
-1. NPM receives request, configured with forward auth for immich.inside.alybadawy.com
+1. NPM receives request, configured with forward auth for photo.in.alybadawy.com
 2. NPM internally connects to Authentik (proxy network)
 3. Authentik validates session cookie/token
 4. Authentik responds with 200 OK + Remote-User header

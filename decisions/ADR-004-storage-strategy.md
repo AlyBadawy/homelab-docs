@@ -49,9 +49,9 @@ The NAS (currently UGreen, planned migration to UniFi UNAS 4) is responsible for
 
 ### Mount Strategy
 NAS storage is mounted on the homelab server via **NFS (Network File System)** at the following paths:
-- `/mnt/nas/nextcloud/data` — Nextcloud user files and shares
-- `/mnt/nas/immich/library` — Immich photo library
-- `/mnt/nas/media` — Reserved for future media services
+- `/mnt/nas/homelab/cloud` — Nextcloud user files and shares
+- `/mnt/nas/homelab/immich` — Immich photo library
+- `/mnt/nas/homelab/media` — Reserved for future media services
 
 Services access these mount points as regular filesystem paths, with container volumes bound to NFS mounts.
 
@@ -126,11 +126,11 @@ Nextcloud and Immich mount NAS storage via NFS, keeping large binary data off th
 services:
   nextcloud:
     volumes:
-      - /mnt/nas/nextcloud/data:/var/www/html/data
+      - /mnt/nas/homelab/cloud:/var/www/html/data
 
   immich-server:
     volumes:
-      - /mnt/nas/immich/library:/photos
+      - /mnt/nas/homelab/immich:/photos
 ```
 
 ---
@@ -200,7 +200,7 @@ The architecture is designed to support NAS migration with minimal disruption:
 
 1. **Setup new NAS:**
    - Deploy UniFi UNAS 4
-   - Configure NFS exports with identical paths (`/nas/nextcloud`, `/nas/immich`, `/nas/media`)
+   - Configure NFS exports with identical paths (`/homelab`, `/homelab`, `/homelab`)
    - Ensure network connectivity and firewall rules
 
 2. **Data migration:**
@@ -324,9 +324,9 @@ Add the following to `/etc/fstab` on the homelab server:
 
 ```fstab
 # NAS mounts (adjust IP address and paths for your environment)
-192.168.1.100:/volume1/nextcloud /mnt/nas/nextcloud nfs defaults,nofail,noatime 0 0
-192.168.1.100:/volume1/immich /mnt/nas/immich nfs defaults,nofail,noatime 0 0
-192.168.1.100:/volume1/media /mnt/nas/media nfs defaults,nofail,noatime 0 0
+172.20.20.10:/homelab /mnt/nas/homelab/cloud nfs defaults,nofail,noatime 0 0
+172.20.20.10:/homelab /mnt/nas/homelab/immich nfs defaults,nofail,noatime 0 0
+172.20.20.10:/homelab /mnt/nas/homelab/media nfs defaults,nofail,noatime 0 0
 ```
 
 **Mount options:**
@@ -339,9 +339,9 @@ Add the following to `/etc/fstab` on the homelab server:
 On the NAS, configure NFS exports:
 
 ```
-/volume1/nextcloud -alldirs -mapall=nobody:nogroup 192.168.1.0/24
-/volume1/immich -alldirs -mapall=nobody:nogroup 192.168.1.0/24
-/volume1/media -alldirs -mapall=nobody:nogroup 192.168.1.0/24
+/homelab -alldirs -mapall=nobody:nogroup 192.168.1.0/24
+/homelab -alldirs -mapall=nobody:nogroup 192.168.1.0/24
+/homelab -alldirs -mapall=nobody:nogroup 192.168.1.0/24
 ```
 
 Adjust the NAS IP range and permissions based on your homelab network topology.
@@ -359,7 +359,7 @@ services:
       - "80:80"
     volumes:
       - /opt/stacks/nextcloud/config:/var/www/html/config
-      - /mnt/nas/nextcloud/data:/var/www/html/data
+      - /mnt/nas/homelab/cloud:/var/www/html/data
     environment:
       - NEXTCLOUD_ADMIN_USER=admin
       - NEXTCLOUD_ADMIN_PASSWORD=secure_password

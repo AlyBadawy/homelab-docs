@@ -3,7 +3,7 @@
 **Environment:** Ubuntu Server 24.04 LTS
 **Stack Directory:** `/opt/stacks/`
 **Docker Networks:** `proxy`, `identity`, `apps`
-**Base Domain:** `*.inside.alybadawy.com`
+**Base Domain:** `*.in.alybadawy.com`
 
 ---
 
@@ -11,14 +11,16 @@
 
 | Service | Image | Networks | Exposed Ports | Volumes | Subdomain |
 |---------|-------|----------|---------------|---------|-----------|
-| Portainer | portainer/portainer-ce:latest | proxy | 9000 (internal to proxy net) | portainer_data, /var/run/docker.sock | portainer.inside.alybadawy.com |
-| Netdata | netdata/netdata:latest | host network | 19999 | host mounts (proc, sys, etc.) | netdata.inside.alybadawy.com |
-| NPM | jc21/nginx-proxy-manager:latest | proxy | 80, 443, 81 (host) | npm_data, npm_letsencrypt, certs volume | npm.inside.alybadawy.com (port 81 admin) |
+| Dashboard | custom Rails app | proxy | 3000 (internal) | dashboard_data | `dashboard.in.alybadawy.com` |
+| NPM | jc21/nginx-proxy-manager:latest | proxy | 80, 443, 81 (host) | npm_data, certs volume | `proxy.in.alybadawy.com` (port 81 admin) |
+| Portainer | portainer/portainer-ce:latest | proxy | 9000 (internal to proxy net) | portainer_data, /var/run/docker.sock | `docker.in.alybadawy.com` |
+| Netdata | netdata/netdata:latest | host network | 19999 | host mounts (proc, sys, etc.) | `netdata.in.alybadawy.com` |
 
 **Notes:**
+- Dashboard is a custom Rails application serving as the homelab landing page/control panel
+- NPM handles TLS termination and reverse proxying; wildcard cert deployed by acme.sh to shared `certs/` volume
 - Portainer is the primary orchestration interface for stack management
-- Netdata provides real-time system monitoring and metrics
-- NPM (Nginx Proxy Manager) handles TLS termination and reverse proxying; wildcard certificate deployed by acme.sh to `certs/` volume
+- Netdata provides real-time system monitoring and metrics; runs in host network mode so it can observe all interfaces and processes
 
 ---
 
@@ -74,6 +76,9 @@
 ```
 /opt/stacks/
 ├── core/
+│   ├── dashboard/
+│   │   ├── docker-compose.yml
+│   │   └── .env                      ← secrets (not in git)
 │   ├── portainer/
 │   │   └── docker-compose.yml
 │   └── netdata/

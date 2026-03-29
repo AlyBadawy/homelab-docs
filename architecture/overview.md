@@ -2,11 +2,12 @@
 
 ## System Summary
 
-- **Hardware**: Beelink Mini S12 (Intel N95, 8GB DDR4, 256GB SSD)
+- **Hardware**: Beelink Mini S12 (Intel N95, 8GB DDR4, 256GB SSD, 2.5 GbE, Wi-Fi 7)
 - **OS**: Ubuntu Server 24.04 LTS
 - **Container Runtime**: Docker (all services containerized)
 - **NAS**: UGreen NAS (upgrading to UniFi UNAS 4) for bulk storage
-- **Domain**: alybadawy.com (DNS via Vercel, internal services via *.inside.alybadawy.com)
+- **AREDN Node**: Mikrotik hAC 2 Lite running WireGuard mesh tunnel (VLAN 40/41)
+- **Domain**: alybadawy.com (DNS via Vercel, internal services via *.in.alybadawy.com)
 - **Access**: LAN + VPN only (no public internet exposure)
 
 ---
@@ -27,9 +28,9 @@
    - Centralized reverse proxy with web UI for easy management
 
 3. **Unified TLS with Wildcard Certificates**
-   - Single wildcard cert: `*.inside.alybadawy.com`
+   - Single wildcard cert: `*.in.alybadawy.com`
    - Provisioned via acme.sh using Vercel DNS API
-   - Covers all subdomains with one certificate (immich.inside.alybadawy.com, nextcloud.inside.alybadawy.com, etc.)
+   - Covers all subdomains with one certificate (photo.in.alybadawy.com, cloud.in.alybadawy.com, etc.)
    - Auto-renewal built into Docker stack
 
 4. **Centralized Authentication**
@@ -88,7 +89,7 @@
 
 **Layer 1: Gateway & VPN**
 - UDR7 handles internet firewall, DHCP, internal DNS, and VPN endpoint
-- Internal DNS resolves `*.inside.alybadawy.com` to homelab server LAN IP
+- Internal DNS resolves `*.in.alybadawy.com` to homelab server LAN IP
 - VPN clients receive LAN IPs and see the same internal DNS
 
 **Layer 2: Reverse Proxy**
@@ -118,12 +119,12 @@
 ### Example: User accessing Nextcloud
 
 1. **DNS Resolution**
-   - User browses to `nextcloud.inside.alybadawy.com`
-   - UDR7's internal DNS resolves to homelab IP (e.g., 172.20.20.15)
+   - User browses to `cloud.in.alybadawy.com`
+   - UDR7's internal DNS resolves to homelab IP (e.g., 172.20.20.5)
 
 2. **TLS Handshake**
    - Client connects to NPM on port 443
-   - NPM presents wildcard cert for `*.inside.alybadawy.com`
+   - NPM presents wildcard cert for `*.in.alybadawy.com`
    - TLS tunnel established
 
 3. **Request Routing**
@@ -155,6 +156,7 @@
 |-----------|---------------|-------|
 | Ubuntu base system | 300 MB | Kernel + essential daemons |
 | Docker daemon | 100 MB | Container runtime overhead |
+| Dashboard (Rails) | 100 MB | Custom homelab dashboard |
 | Portainer | 50 MB | Container management UI |
 | Netdata | 150 MB | Metrics collection & dashboard |
 | Nginx Proxy Manager | 50 MB | Reverse proxy & routing |
@@ -167,7 +169,7 @@
 | Immich (server) | 400 MB | API server |
 | Immich (ML service) | 800 MB – 1.5 GB | ML model inference (heaviest) |
 | Home Assistant | 400 MB | Automation engine |
-| **Total (peak)** | **~3.5 – 4.0 GB** | Under 8GB RAM + 8GB swap |
+| **Total (peak)** | **~3.6 – 4.2 GB** | Under 8GB RAM + 8GB swap |
 
 ### Why This Works
 
@@ -191,6 +193,8 @@ The Beelink Mini S12 is **well-suited** for this architecture:
 - **CPU**: Intel N95 (4-core, N-series efficiency) handles container orchestration and service requests comfortably
 - **RAM**: 8GB is sufficient with disciplined container limits and 8GB swap as overflow buffer
 - **Storage**: 256GB SSD adequate for OS and Docker layers; NAS holds user data
-- **Form factor**: Fanless Mini PC is silent, reliable, and consumes <25W
+- **Network**: 2.5 GbE wired connection ensures fast NFS transfers to the NAS (on the same VLAN)
+- **AREDN**: Mikrotik hAC 2 Lite handles the AREDN mesh uplink on its own dedicated VLANs (40/41), isolated from homelab services
+- **Form factor**: Mini PC is silent, reliable, and consumes <25W
 
 This setup scales well for a home office, small team, or hobby projects. For 10+ concurrent users or high-throughput workloads, consider a larger/more powerful system.

@@ -7,7 +7,7 @@ Complete guide to deploying LLDAP and Authentik for centralized identity and aut
 - Docker networks: `identity` (pre-created)
 - PostgreSQL running on `identity` network (container name: `postgres`)
 - Redis running on `identity` network (container name: `redis`)
-- NPM with wildcard cert configured for `*.inside.alybadawy.com`
+- NPM with wildcard cert configured for `*.in.alybadawy.com`
 - Stack directory structure in place: `/opt/stacks/identity/`
 
 ## Section 1: LLDAP Deployment
@@ -17,7 +17,7 @@ LLDAP is a lightweight LDAP server that acts as your user directory. All homelab
 **LLDAP Configuration:**
 - Base DN: `dc=inside,dc=alybadawy,dc=com`
 - Admin user: `admin` (LDAP directory admin, not an app user)
-- Web UI domain: `lldap.inside.alybadawy.com` (optional but recommended)
+- Web UI domain: `lldap.in.alybadawy.com` (optional but recommended)
 - LDAP port: `3890` (internal only, no external access needed)
 
 ### Step 1: Create LLDAP Docker Compose File
@@ -87,17 +87,17 @@ Expected output: `LLDAP successfully started!`
 
 In Nginx Proxy Manager, add a new proxy host:
 
-- **Domain Name:** `lldap.inside.alybadawy.com`
+- **Domain Name:** `lldap.in.alybadawy.com`
 - **Scheme:** `http`
 - **Forward Hostname/IP:** `lldap`
 - **Forward Port:** `17170`
-- **SSL Certificate:** Select wildcard cert for `inside.alybadawy.com`
+- **SSL Certificate:** Select wildcard cert for `in.alybadawy.com`
 - **Force SSL:** On
 - **HTTP/2 Support:** On
 
 ### Step 5: Initialize LLDAP
 
-Access the web UI at `https://lldap.inside.alybadawy.com`
+Access the web UI at `https://lldap.in.alybadawy.com`
 
 1. **Login** with credentials:
    - Username: `admin`
@@ -125,7 +125,7 @@ Your LLDAP directory is now ready. Users created here will sync to Authentik in 
 Authentik is your central authentication platform. It connects to LLDAP for user/group data and provides OIDC/OAuth2 login for all your applications.
 
 **Authentik Configuration:**
-- Domain: `auth.inside.alybadawy.com`
+- Domain: `auth.in.alybadawy.com`
 - Admin panel port: `9000`
 - Connects to PostgreSQL and Redis on the `identity` network
 - Uses LLDAP as the user directory source
@@ -224,18 +224,18 @@ Watch for message: `Starting application server for authentik...`
 
 In Nginx Proxy Manager, add a new proxy host:
 
-- **Domain Name:** `auth.inside.alybadawy.com`
+- **Domain Name:** `auth.in.alybadawy.com`
 - **Scheme:** `http`
 - **Forward Hostname/IP:** `authentik-server`
 - **Forward Port:** `9000`
-- **SSL Certificate:** Select wildcard cert for `inside.alybadawy.com`
+- **SSL Certificate:** Select wildcard cert for `in.alybadawy.com`
 - **Force SSL:** On
 - **HTTP/2 Support:** On
 - **Websockets Support:** On (toggle in NPM)
 
 ### Step 5: Complete Authentik Initial Setup
 
-Access `https://auth.inside.alybadawy.com/if/flow/initial-setup/`
+Access `https://auth.in.alybadawy.com/if/flow/initial-setup/`
 
 1. **Create the akadmin account:**
    - Username: `akadmin`
@@ -345,10 +345,10 @@ Each application will need a specific Redirect URI. You'll create the OIDC provi
 Before moving to the next deployment guide, verify:
 
 - [ ] LLDAP is running: `docker ps | grep lldap`
-- [ ] LLDAP web UI accessible: `https://lldap.inside.alybadawy.com` (login works)
+- [ ] LLDAP web UI accessible: `https://lldap.in.alybadawy.com` (login works)
 - [ ] User directory has your account + groups created
 - [ ] Authentik is running: `docker ps | grep authentik`
-- [ ] Authentik accessible: `https://auth.inside.alybadawy.com` (login as akadmin works)
+- [ ] Authentik accessible: `https://auth.in.alybadawy.com` (login as akadmin works)
 - [ ] LDAP source synced: Users visible in Authentik Directory
 - [ ] Created OIDC providers for planned services (or will do per-service)
 
@@ -390,7 +390,7 @@ docker exec authentik-server /bin/bash -c "psql -h postgres -U authentik -d auth
 
 ## Next Steps
 
-Your identity stack is ready. Proceed to **06-application-services.md** to deploy:
+Your identity stack is ready. Proceed to **07-application-services.md** to deploy:
 - Nextcloud with OIDC login
 - Immich with OIDC login
 - Home Assistant with OAuth2 login

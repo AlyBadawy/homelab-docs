@@ -4,7 +4,7 @@ This guide covers deploying the core services of the homelab: Nginx Proxy Manage
 
 **Prerequisites:**
 - Docker networks created (see guide 02): `proxy`, `identity`, `apps`
-- SSL certificates issued (see guide 03): wildcard cert for `*.inside.alybadawy.com`
+- SSL certificates issued (see guide 03): wildcard cert for `*.in.alybadawy.com`
 - Stack directories: `/opt/stacks/proxy/npm/`, `/opt/stacks/core/`, `/opt/stacks/db/`
 
 ---
@@ -75,10 +75,10 @@ Wait 10–15 seconds for NPM to initialize its database.
 Access the NPM admin panel in your browser:
 
 ```
-http://172.20.20.15:81
+http://172.20.20.5:81
 ```
 
-Replace `172.20.20.15` with your server's local IP (e.g., `192.168.1.50`).
+Replace `172.20.20.5` with your server's local IP (e.g., `192.168.1.50`).
 
 ⚠️ **Warning:** The default credentials grant full access to all proxy hosts. Change them immediately.
 
@@ -113,12 +113,12 @@ cat /opt/stacks/proxy/npm/certs/key.pem
 
 ### 1.5: Create First Proxy Host (NPM Admin)
 
-Create a proxy host for NPM's own admin panel, accessible at `npm.inside.alybadawy.com`:
+Create a proxy host for NPM's own admin panel, accessible at `proxy.in.alybadawy.com`:
 
 1. Go to **Proxy Hosts** in the left menu
 2. Click **Add Proxy Host**
 3. Fill in the **Details** tab:
-   - **Domain Names:** `npm.inside.alybadawy.com`
+   - **Domain Names:** `proxy.in.alybadawy.com`
    - **Scheme:** `http`
    - **Forward Hostname/IP:** `npm`
    - **Forward Port:** `81`
@@ -134,16 +134,16 @@ Create a proxy host for NPM's own admin panel, accessible at `npm.inside.alybada
 Test access:
 
 ```bash
-curl -k https://npm.inside.alybadawy.com
+curl -k https://proxy.in.alybadawy.com
 ```
 
-Or open in browser: `https://npm.inside.alybadawy.com`
+Or open in browser: `https://proxy.in.alybadawy.com`
 
 ### 1.6: Disable Direct Port 81 Access (Optional but Recommended)
 
 Once NPM is proxying itself, you don't need direct access to port 81. Disable it:
 
-⚠️ **Warning:** After this step, you must access NPM admin at `https://npm.inside.alybadawy.com` only. If DNS fails, you'll need to use the server's console.
+⚠️ **Warning:** After this step, you must access NPM admin at `https://proxy.in.alybadawy.com` only. If DNS fails, you'll need to use the server's console.
 
 1. Remove port 81 from the docker-compose:
    ```bash
@@ -217,11 +217,11 @@ docker ps | grep portainer
 
 ### 2.3: Create NPM Proxy Host for Portainer
 
-Add a proxy host in NPM to route `portainer.inside.alybadawy.com` to the Portainer container.
+Add a proxy host in NPM to route `docker.in.alybadawy.com` to the Portainer container.
 
 1. Go to NPM admin → **Proxy Hosts** → **Add Proxy Host**
 2. Fill in the **Details** tab:
-   - **Domain Names:** `portainer.inside.alybadawy.com`
+   - **Domain Names:** `docker.in.alybadawy.com`
    - **Scheme:** `http`
    - **Forward Hostname/IP:** `portainer`
    - **Forward Port:** `9000`
@@ -237,7 +237,7 @@ Add a proxy host in NPM to route `portainer.inside.alybadawy.com` to the Portain
 Access Portainer:
 
 ```
-https://portainer.inside.alybadawy.com
+https://docker.in.alybadawy.com
 ```
 
 On first access, you'll be prompted to create an admin account:
@@ -333,7 +333,7 @@ Should return JSON with Netdata version and capabilities.
 
 1. Go to NPM admin → **Proxy Hosts** → **Add Proxy Host**
 2. Fill in the **Details** tab:
-   - **Domain Names:** `netdata.inside.alybadawy.com`
+   - **Domain Names:** `netdata.in.alybadawy.com`
    - **Scheme:** `http`
    - **Forward Hostname/IP:** `127.0.0.1` ← localhost because of host network mode
    - **Forward Port:** `19999`
@@ -349,7 +349,7 @@ Should return JSON with Netdata version and capabilities.
 Open in browser:
 
 ```
-https://netdata.inside.alybadawy.com
+https://netdata.in.alybadawy.com
 ```
 
 You'll see real-time system metrics:
@@ -565,9 +565,9 @@ You now have a complete core infrastructure:
 
 | Service | Container | Network | Access |
 |---------|-----------|---------|--------|
-| **Nginx Proxy Manager** | npm | proxy | `https://npm.inside.alybadawy.com` (port 80, 443) |
-| **Portainer** | portainer | proxy | `https://portainer.inside.alybadawy.com` |
-| **Netdata** | netdata | host (19999) | `https://netdata.inside.alybadawy.com` |
+| **Nginx Proxy Manager** | npm | proxy | `https://proxy.in.alybadawy.com` (port 80, 443) |
+| **Portainer** | portainer | proxy | `https://docker.in.alybadawy.com` |
+| **Netdata** | netdata | host (19999) | `https://netdata.in.alybadawy.com` |
 | **PostgreSQL** | postgres | identity, apps | `postgres:5432` (container-only) |
 | **Redis** | redis | identity, apps | `redis:6379` (container-only) |
 
@@ -576,9 +576,9 @@ You now have a complete core infrastructure:
 ## Next Steps
 
 1. **Access your services:**
-   - NPM admin: `https://npm.inside.alybadawy.com`
-   - Portainer: `https://portainer.inside.alybadawy.com`
-   - Netdata: `https://netdata.inside.alybadawy.com`
+   - NPM admin: `https://proxy.in.alybadawy.com`
+   - Portainer: `https://docker.in.alybadawy.com`
+   - Netdata: `https://netdata.in.alybadawy.com`
 
 2. **Monitor the databases:**
    - Use Portainer's UI to view container logs and stats

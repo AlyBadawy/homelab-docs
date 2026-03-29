@@ -90,7 +90,7 @@ sudo sync
 **Warning:** This step is destructive. Verify you are formatting the correct disk.
 
 ### Profile Setup
-- **Hostname:** Enter `homelab`
+- **Hostname:** Enter `lab` (the full DNS name will be `lab.in.alybadawy.com`, registered on the UDR7 internal DNS)
 - **Username:** Enter `aly`
 - **Password:** Create a strong password (mix of uppercase, lowercase, numbers, special chars)
 - Confirm the password
@@ -159,7 +159,7 @@ network:
     enp1s0:
       dhcp4: no
       addresses:
-        - 172.20.20.15/24           # Homelab static IP on Servers VLAN
+        - 172.20.20.5/24           # Homelab static IP on Servers VLAN
       routes:
         - to: default
           via: 172.20.20.1           # UDR7 gateway for Servers VLAN (VLAN 20)
@@ -281,47 +281,19 @@ This will prompt for a mail notification setting. You can skip it for a home ser
 
 ## 11. NFS Client Setup (for NAS Mounts)
 
-If you have a NAS (e.g., Synology NAS) with NFS shares, set up the NFS client:
+Install the NFS client package — this is all that's needed at this stage:
 
 ```bash
 sudo apt install -y nfs-common
 ```
 
-Create mount points for NAS shares:
+Create the mount point directories so they exist before fstab is configured:
 
 ```bash
-sudo mkdir -p /mnt/nas/nextcloud /mnt/nas/immich /mnt/nas/media
+sudo mkdir -p /mnt/nas/cloud /mnt/nas/immich /mnt/nas/media
 ```
 
-Add NFS mounts to `/etc/fstab`:
-
-```bash
-sudo vim /etc/fstab
-```
-
-Append these lines. The NAS IP is `172.20.20.10` (Servers VLAN). The export paths below use UGreen NAS conventions — adjust the share names if they differ on your NAS, and update when migrating to the UniFi UNAS 4:
-
-```bash
-# NAS NFS mounts — NAS at 172.20.20.10 on Servers VLAN
-172.20.20.10:/nextcloud  /mnt/nas/nextcloud  nfs  defaults,_netdev,nfsvers=4  0 0
-172.20.20.10:/immich     /mnt/nas/immich     nfs  defaults,_netdev,nfsvers=4  0 0
-172.20.20.10:/media      /mnt/nas/media      nfs  defaults,_netdev,nfsvers=4  0 0
-```
-
-> The NFS export names (e.g., `/nextcloud`) must match what is configured in the NAS NFS settings. Check your NAS admin panel under Shared Folders → NFS permissions to confirm the exact export paths.
-
-Mount all filesystems:
-
-```bash
-sudo mount -a
-```
-
-Verify the mounts:
-
-```bash
-mount | grep nfs
-df -h | grep /mnt/nas
-```
+> **Full NAS mount configuration is covered in [Guide 02 — NAS Mounts](02-nas-mounts.md).** That guide covers NAS-side NFS export setup, resilient fstab options (automount, nofail, soft mounts), Docker service dependency ordering, ownership setup, and resilience testing. Complete guide 02 before starting guide 03 (Docker).
 
 ---
 
@@ -365,7 +337,7 @@ Expected output:
 
 ## Next Steps
 
-The OS is now ready for Docker installation. Proceed to **02-docker-setup.md** to install and configure Docker CE.
+The OS is now ready for Docker installation. Proceed to **03-docker-setup.md** to install and configure Docker CE.
 
 ---
 
@@ -387,15 +359,11 @@ sudo netplan validate
 ```
 
 **Problem: NFS mount fails**
+
+See [Guide 02 — NAS Mounts](02-nas-mounts.md) for full NFS troubleshooting. Quick connectivity check:
 ```bash
-# Test NAS connectivity
 ping 172.20.20.10
-
-# Check NFS exports on NAS (from NAS GUI or SSH)
 showmount -e 172.20.20.10
-
-# Check mount details
-sudo mount -v | grep nfs
 ```
 
 **Problem: Firewall blocking SSH**

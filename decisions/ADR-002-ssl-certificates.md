@@ -1,4 +1,4 @@
-# ADR-002: SSL Certificate Management for *.inside.alybadawy.com
+# ADR-002: SSL Certificate Management for *.in.alybadawy.com
 
 **Date:** 2026-03-29
 **Status:** Accepted
@@ -9,22 +9,22 @@
 
 ## Context
 
-The homelab infrastructure requires TLS certificates to enable secure HTTPS communication for services accessed via `*.inside.alybadawy.com` subdomains. The current architecture presents several constraints and requirements that significantly impact certificate acquisition and renewal strategy:
+The homelab infrastructure requires TLS certificates to enable secure HTTPS communication for services accessed via `*.in.alybadawy.com` subdomains. The current architecture presents several constraints and requirements that significantly impact certificate acquisition and renewal strategy:
 
 ### Current Infrastructure
 
 - **Primary Domain:** `alybadawy.com`, registered and managed via Vercel DNS (user preference to maintain Vercel as DNS provider)
 - **Public DNS Configuration:**
-  - `inside.alybadawy.com` → A record pointing to UDR public IP address
-  - `*.inside.alybadawy.com` → CNAME record pointing to `inside.alybadawy.com`
+  - `in.alybadawy.com` → A record pointing to UDR public IP address
+  - `*.in.alybadawy.com` → CNAME record pointing to `in.alybadawy.com`
   - Public IP address is dynamically updated via a maintenance script
-- **Internal DNS Override:** Local DNS resolver configured to respond with homelab server LAN IP for `*.inside.alybadawy.com` queries
+- **Internal DNS Override:** Local DNS resolver configured to respond with homelab server LAN IP for `*.in.alybadawy.com` queries
 - **Reverse Proxy:** Nginx Proxy Manager (NPM) deployed in Docker, responsible for routing and TLS termination
 - **Network Isolation:** Homelab is **not publicly exposed** to the internet; firewall rules block inbound traffic on ports 80 and 443 from WAN
 
 ### Certificate Requirements
 
-- **Certificate Type:** Wildcard certificate for `*.inside.alybadawy.com` to cover all current and future subdomains (e.g., `app1.inside.alybadawy.com`, `api.inside.alybadawy.com`, etc.)
+- **Certificate Type:** Wildcard certificate for `*.in.alybadawy.com` to cover all current and future subdomains (e.g., `app1.in.alybadawy.com`, `api.in.alybadawy.com`, etc.)
 - **Auto-renewal:** Certificates must renew automatically before expiry to prevent service disruptions
 - **Operational:** Solution must require minimal manual intervention after initial setup
 - **Security:** Sensitive credentials (DNS API tokens) must be stored securely on the homelab server
@@ -52,7 +52,7 @@ The architecture eliminates two of the three standard ACME challenge types:
 
 ## Decision
 
-**Use `acme.sh` running on the homelab host (via systemd timer) with the Vercel DNS plugin to issue and renew the wildcard certificate `*.inside.alybadawy.com`. Automatically import renewed certificates into Nginx Proxy Manager via a deploy hook.**
+**Use `acme.sh` running on the homelab host (via systemd timer) with the Vercel DNS plugin to issue and renew the wildcard certificate `*.in.alybadawy.com`. Automatically import renewed certificates into Nginx Proxy Manager via a deploy hook.**
 
 ### Implementation Strategy
 
@@ -62,7 +62,7 @@ The architecture eliminates two of the three standard ACME challenge types:
 - **DNS Plugin:** Community-maintained `dns_vercel` plugin integrated with acme.sh
 - **Authentication:** Vercel API token stored in `/root/.acme.sh/account.conf` on the host
 - **Scheduling:** systemd timer (alternative: cron job) checks for expiry and renews 30 days before expiration
-- **Certificate Path:** Generated certificates stored in `/root/.acme.sh/inside.alybadawy.com/` directory
+- **Certificate Path:** Generated certificates stored in `/root/.acme.sh/in.alybadawy.com/` directory
 
 #### 2. Certificate Deployment to NPM
 
@@ -225,7 +225,7 @@ The architecture eliminates two of the three standard ACME challenge types:
    - Reduces risk of expired certificate outages
 
 2. **Single Wildcard Certificate**
-   - One cert covers `*.inside.alybadawy.com` and all current/future subdomains
+   - One cert covers `*.in.alybadawy.com` and all current/future subdomains
    - Simplifies certificate management (only one cert to track)
    - Reduces renewal complexity as infrastructure scales
 
@@ -320,11 +320,11 @@ acme.sh --set-notify "$(pwd)/deploy_hook.sh"
 #### 3. Issue Initial Certificate
 
 ```bash
-# Issue certificate for *.inside.alybadawy.com using Vercel DNS plugin
+# Issue certificate for *.in.alybadawy.com using Vercel DNS plugin
 acme.sh --issue \
   --dns dns_vercel \
-  -d inside.alybadawy.com \
-  -d "*.inside.alybadawy.com" \
+  -d in.alybadawy.com \
+  -d "*.in.alybadawy.com" \
   --home /root/.acme.sh \
   --dnssleep 10
 ```
@@ -347,7 +347,7 @@ acme.sh --issue \
 set -e
 
 # Source environment to get NPM paths
-export CERT_NAME="inside.alybadawy.com"
+export CERT_NAME="in.alybadawy.com"
 export CERT_SOURCE="${HOME}/.acme.sh/${CERT_NAME}"
 export CERT_DEST="/opt/stacks/proxy/npm/certs"
 export NPM_CONTAINER="nginx-proxy-manager"
@@ -363,12 +363,12 @@ mkdir -p "${CERT_DEST}"
 
 # Copy certificate files with timestamp for backup
 TIMESTAMP=$(date +%s)
-cp "${CERT_SOURCE}/fullchain.cer" "${CERT_DEST}/inside.alybadawy.com.fullchain.cer.${TIMESTAMP}"
-cp "${CERT_SOURCE}/${CERT_NAME}.key" "${CERT_DEST}/inside.alybadawy.com.key.${TIMESTAMP}"
+cp "${CERT_SOURCE}/fullchain.cer" "${CERT_DEST}/in.alybadawy.com.fullchain.cer.${TIMESTAMP}"
+cp "${CERT_SOURCE}/${CERT_NAME}.key" "${CERT_DEST}/in.alybadawy.com.key.${TIMESTAMP}"
 
 # Update active symlinks (NPM reads from these)
-ln -sfn "${CERT_DEST}/inside.alybadawy.com.fullchain.cer.${TIMESTAMP}" "${CERT_DEST}/inside.alybadawy.com.crt"
-ln -sfn "${CERT_DEST}/inside.alybadawy.com.key.${TIMESTAMP}" "${CERT_DEST}/inside.alybadawy.com.key"
+ln -sfn "${CERT_DEST}/in.alybadawy.com.fullchain.cer.${TIMESTAMP}" "${CERT_DEST}/in.alybadawy.com.crt"
+ln -sfn "${CERT_DEST}/in.alybadawy.com.key.${TIMESTAMP}" "${CERT_DEST}/in.alybadawy.com.key"
 
 # Restart NPM container to load new certificates
 docker restart "${NPM_CONTAINER}" || {
@@ -445,8 +445,8 @@ sudo journalctl -u acme-renew -f
 2. **Navigate to:** SSL Certificates → Add Certificate
 3. **Select:** Custom Certificate
 4. **Paths:**
-   - Certificate file: `/certs/inside.alybadawy.com.crt`
-   - Private key file: `/certs/inside.alybadawy.com.key`
+   - Certificate file: `/certs/in.alybadawy.com.crt`
+   - Private key file: `/certs/in.alybadawy.com.key`
 5. **Save**
 
 NPM Docker Compose must include volume mount:
@@ -464,9 +464,9 @@ The renewal process:
 2. **Day 65+:** If cert expires within 30 days, renewal begins
 3. **Renewal Process:**
    - acme.sh uses Vercel API token to authenticate
-   - Provisions TXT record: `_acme-challenge.inside.alybadawy.com`
+   - Provisions TXT record: `_acme-challenge.in.alybadawy.com`
    - Let's Encrypt validates DNS ownership
-   - New cert issued to `/root/.acme.sh/inside.alybadawy.com/`
+   - New cert issued to `/root/.acme.sh/in.alybadawy.com/`
 4. **Deploy Hook:**
    - Copies new cert to `/opt/stacks/proxy/npm/certs/`
    - Updates symlinks
@@ -478,7 +478,7 @@ The renewal process:
 Recommended monitoring:
 ```bash
 # Check cert expiry in NPM
-openssl x509 -in /opt/stacks/proxy/npm/certs/inside.alybadawy.com.crt -noout -enddate
+openssl x509 -in /opt/stacks/proxy/npm/certs/in.alybadawy.com.crt -noout -enddate
 
 # Check systemd timer status
 systemctl status acme-renew.timer
@@ -511,7 +511,7 @@ Mitigation:
 1. Revoke old token in Vercel dashboard
 2. Generate new token
 3. Update token in `/root/.acme.sh/account.conf` (or however it's stored)
-4. Test renewal with `acme.sh --renew -d inside.alybadawy.com`
+4. Test renewal with `acme.sh --renew -d in.alybadawy.com`
 
 ---
 
@@ -530,7 +530,7 @@ If Vercel is replaced in the future:
 If additional domain names are needed:
 ```bash
 # Add additional domains to existing cert
-acme.sh --renew -d inside.alybadawy.com -d "*.inside.alybadawy.com" -d "*.example.com"
+acme.sh --renew -d in.alybadawy.com -d "*.in.alybadawy.com" -d "*.example.com"
 ```
 
 ### Integration with Secrets Management
