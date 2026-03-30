@@ -62,7 +62,7 @@ volumes:
   - nextcloud_config:/var/www/html              # SSD (config/code)
 ```
 
-### Immich (`photo.in.alybadawy.com`)
+### Immich (`photos.in.alybadawy.com`)
 
 | Data Type | Location | Notes |
 |-----------|----------|-------|

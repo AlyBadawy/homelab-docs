@@ -54,7 +54,7 @@ This repository is the single source of truth for the homelab server — coverin
 | Netdata             | System monitoring (CPU/RAM/disk/network)      | `netdata.in.alybadawy.com`   |
 | Authentik           | SSO / Identity Provider (OIDC + LDAP outpost) | `auth.in.alybadawy.com`      |
 | Nextcloud           | Self-hosted file sync and productivity        | `cloud.in.alybadawy.com`     |
-| Immich              | Self-hosted photo management                  | `photo.in.alybadawy.com`     |
+| Immich              | Self-hosted photo management                  | `photos.in.alybadawy.com`     |
 | Home Assistant      | Home automation hub                           | `ha.in.alybadawy.com`        |
 | LLDAP               | Lightweight LDAP user directory               | _(internal only, port 3890)_ |
 | PostgreSQL          | Shared relational database                    | _(internal only)_            |

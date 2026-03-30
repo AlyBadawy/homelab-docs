@@ -30,7 +30,7 @@
 3. **Unified TLS with Wildcard Certificates**
    - Single wildcard cert: `*.in.alybadawy.com`
    - Provisioned via acme.sh using Vercel DNS API
-   - Covers all subdomains with one certificate (photo.in.alybadawy.com, cloud.in.alybadawy.com, etc.)
+   - Covers all subdomains with one certificate (photos.in.alybadawy.com, cloud.in.alybadawy.com, etc.)
    - Auto-renewal built into Docker stack
 
 4. **Centralized Authentication**

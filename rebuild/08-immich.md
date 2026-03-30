@@ -94,7 +94,7 @@ Click **Deploy the stack**. Wait 2–3 minutes for the database to initialize. C
 
 In NPM → **Proxy Hosts → Add Proxy Host**:
 
-- **Domain Names:** `photo.in.alybadawy.com`
+- **Domain Names:** `photos.in.alybadawy.com`
 - **Scheme:** `http`
 - **Forward Hostname/IP:** `immich-server`
 - **Forward Port:** `2283`
@@ -119,7 +119,7 @@ These settings support large video file uploads.
 
 ## Section 3: Complete Immich Initial Setup
 
-Open `https://photo.in.alybadawy.com`. You'll be taken through an onboarding wizard:
+Open `https://photos.in.alybadawy.com`. You'll be taken through an onboarding wizard:
 
 1. Create an initial admin account (temporary — you'll use OIDC for production)
 2. Complete the wizard
@@ -134,7 +134,7 @@ In **Authentik Admin → Applications → Providers**:
 2. Fill in:
    - **Name:** `Immich OIDC`
    - **Client Type:** `Confidential`
-   - **Redirect URIs:** `https://photo.in.alybadawy.com/auth/login`
+   - **Redirect URIs:** `https://photos.in.alybadawy.com/auth/login`
 3. Click **Create**
 4. Copy the **Client ID** and **Client Secret** — you'll need both in Section 5
 
@@ -179,7 +179,7 @@ In **Authentik Admin → Applications → Applications**:
 ## Verification Checklist
 
 - [ ] All Immich containers running: `docker ps | grep immich` — all show `Up`
-- [ ] `https://photo.in.alybadawy.com` loads, SSL valid
+- [ ] `https://photos.in.alybadawy.com` loads, SSL valid
 - [ ] Initial admin login works
 - [ ] OAuth configured in Immich settings
 - [ ] LLDAP user can log in via OAuth → Authentik

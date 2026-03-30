@@ -4,24 +4,24 @@
 
 The home network uses UniFi VLAN segmentation for isolation between device classes. The homelab server and NAS both reside on the **Servers VLAN**.
 
-| Name | VLAN ID | Subnet | Gateway | Purpose |
-|------|---------|--------|---------|---------|
-| Default | 1 | 172.20.1.0/24 | 172.20.1.1 | Management / primary devices |
-| Personal | 10 | 172.20.10.0/24 | 172.20.10.1 | Personal computers, phones |
-| **Servers** | **20** | **172.20.20.0/24** | **172.20.20.1** | **Homelab server + NAS** |
-| Work | 30 | 172.20.30.0/24 | 172.20.30.1 | Work devices (isolated) |
-| Aredn-Wan | 40 | 172.20.40.0/24 | 172.20.40.1 | AREDN mesh WAN uplink |
-| Aredn-Lan | 41 | 10.6.229.8/29 | — | AREDN mesh LAN segment |
-| IoT | 100 | 172.20.100.0/24 | 172.20.100.1 | Smart home / IoT devices |
-| Guest | 200 | 172.20.200.0/24 | 172.20.200.1 | Guest Wi-Fi (isolated) |
+| Name        | VLAN ID | Subnet             | Gateway         | Purpose                      |
+| ----------- | ------- | ------------------ | --------------- | ---------------------------- |
+| Default     | 1       | 172.20.1.0/24      | 172.20.1.1      | Management / primary devices |
+| Personal    | 10      | 172.20.10.0/24     | 172.20.10.1     | Personal computers, phones   |
+| **Servers** | **20**  | **172.20.20.0/24** | **172.20.20.1** | **Homelab server + NAS**     |
+| Work        | 30      | 172.20.30.0/24     | 172.20.30.1     | Work devices (isolated)      |
+| Aredn-Wan   | 40      | 172.20.40.0/24     | 172.20.40.1     | AREDN mesh WAN uplink        |
+| Aredn-Lan   | 41      | 10.6.229.8/29      | —               | AREDN mesh LAN segment       |
+| IoT         | 100     | 172.20.100.0/24    | 172.20.100.1    | Smart home / IoT devices     |
+| Guest       | 200     | 172.20.200.0/24    | 172.20.200.1    | Guest Wi-Fi (isolated)       |
 
 ### Key Device Assignments (Servers VLAN — 172.20.20.0/24)
 
-| Device | IP | Notes |
-|--------|----|-------|
-| UDR7 (Servers VLAN gateway) | 172.20.20.1 | Also the DNS server for this VLAN |
-| NAS (UGreen → UniFi UNAS 4) | 172.20.20.10 | NFS exports for Nextcloud + Immich |
-| Homelab server (Beelink) | 172.20.20.5 | Static IP — hostname `lab.in.alybadawy.com` |
+| Device                      | IP           | Notes                                       |
+| --------------------------- | ------------ | ------------------------------------------- |
+| UDR7 (Servers VLAN gateway) | 172.20.20.1  | Also the DNS server for this VLAN           |
+| NAS (UGreen → UniFi UNAS 4) | 172.20.20.10 | NFS exports for Nextcloud + Immich          |
+| Homelab server (Beelink)    | 172.20.20.5  | Static IP — hostname `lab.in.alybadawy.com` |
 
 > **Why Servers VLAN?** Placing both the homelab and NAS on the same VLAN means NFS traffic between them stays entirely within VLAN 20 at LAN speeds, without traversing firewall rules between VLANs. Personal and IoT devices access services through NPM via inter-VLAN routing controlled by the UDR7 firewall.
 
@@ -41,23 +41,40 @@ in.alybadawy.com          A record    → UDR7 public IP
 ```
 
 - The A record points to the UDR7's public IP, which is dynamic and updated periodically by a script
-- The wildcard CNAME allows any subdomain (photo.in.alybadawy.com, cloud.in.alybadawy.com, etc.) to resolve through the same public A record
+- The wildcard CNAME allows any subdomain (photos.in.alybadawy.com, cloud.in.alybadawy.com, etc.) to resolve through the same public A record
 - Let's Encrypt DNS-01 challenges use the Vercel API to validate domain ownership for wildcard cert issuance
 
 ### Internal DNS (UniFi UDR7 Built-in DNS)
 
-The UDR7 DNS server overrides public DNS for internal clients, ensuring direct routing without hairpin NAT:
+The UDR7 DNS server overrides public DNS for internal clients, ensuring direct routing without hairpin NAT. Records are configured under **UniFi → Network → DNS → Local DNS Records**.
 
-```
-in.alybadawy.com          A record    → 172.20.20.1  (UDR7 Servers VLAN gateway)
-lab.in.alybadawy.com      A record    → 172.20.20.5  (homelab server hostname)
-*.in.alybadawy.com        A record    → 172.20.20.5  (wildcard → all services on homelab)
-```
+**Host (A) Records:**
+
+| Domain                 | IP             | Notes                                            |
+| ---------------------- | -------------- | ------------------------------------------------ |
+| `lab.in.alybadawy.com` | `172.20.20.5`  | Homelab server — all CNAMEs resolve through this |
+| `nas.in.alybadawy.com` | `172.20.20.10` | NAS direct hostname                              |
+| `localnode.local.mesh` | `10.6.229.9`   | AREDN mesh node                                  |
+
+**Alias (CNAME) Records — all point to `lab.in.alybadawy.com`:**
+
+| Domain                     | →                      |
+| -------------------------- | ---------------------- |
+| `proxy.in.alybadawy.com`   | `lab.in.alybadawy.com` |
+| `dockers.in.alybadawy.com` | `lab.in.alybadawy.com` |
+| `netdata.in.alybadawy.com` | `lab.in.alybadawy.com` |
+| `nas-ui.in.alybadawy.com`  | `lab.in.alybadawy.com` |
+| `lldap.in.alybadawy.com`   | `lab.in.alybadawy.com` |
+| `auth.in.alybadawy.com`    | `lab.in.alybadawy.com` |
+| `photos.in.alybadawy.com`  | `lab.in.alybadawy.com` |
+| `cloud.in.alybadawy.com`   | `lab.in.alybadawy.com` |
+
+All TTLs are set to Auto. Rather than a single wildcard `*.in.alybadawy.com` A record, each service subdomain is explicitly registered as a CNAME. This makes DNS intent visible and avoids resolving non-existent services.
 
 - Internal clients query UDR7's DNS
-- Requests for `in.alybadawy.com` resolve to the UDR7 itself (gateway)
-- Requests for subdomains (e.g., `photo.in.alybadawy.com`) resolve directly to the homelab server
-- This avoids "hairpin NAT" — clients don't need to loop traffic through the internet gateway
+- Each subdomain CNAME resolves to `lab.in.alybadawy.com`, which resolves to `172.20.20.5`
+- Traffic arrives directly at NPM on the homelab — no internet roundtrip (no hairpin NAT)
+- New services require a new CNAME entry in UDR7's Local DNS Records
 
 ### Why This Two-Level Setup Works for TLS
 
@@ -68,13 +85,13 @@ lab.in.alybadawy.com      A record    → 172.20.20.5  (homelab server hostname)
 
 2. **Internal Client Resolution**
    - LAN clients query UDR7 DNS
-   - `photo.in.alybadawy.com` resolves to homelab server IP (172.20.20.5)
+   - `photos.in.alybadawy.com` resolves to homelab server IP (172.20.20.5)
    - Request hits NPM directly on the local network (no internet roundtrip)
 
 3. **TLS Validity**
    - The wildcard cert is publicly signed (by Let's Encrypt)
    - All major browsers and OS trust Let's Encrypt as a root CA
-   - Clients connecting to `photo.in.alybadawy.com` receive a valid cert matching the hostname
+   - Clients connecting to `photos.in.alybadawy.com` receive a valid cert matching the hostname
    - No SSL warnings or browser errors
 
 4. **External/VPN Access**
@@ -118,14 +135,13 @@ VPN Client (remote)
 
 ### Homelab Server Ports
 
-| Port | Service | Scope | Purpose |
-|------|---------|-------|---------|
-| 80 | NPM (HTTP) | LAN + VPN | Redirect HTTP → HTTPS |
-| 443 | NPM (HTTPS) | LAN + VPN | All web services via reverse proxy |
-| 81 | NPM Admin UI | Local/LAN only | Web UI for proxy configuration |
-| 19999 | Netdata | Host network, LAN accessible | Metrics dashboard (also proxied via NPM) |
-| 3890 | LLDAP | Docker internal network only | LDAP protocol (not exposed to LAN) |
-| All other service ports | (Application containers) | Docker networks only | Internal communication only |
+| Port                    | Service                  | Scope                        | Purpose                                  |
+| ----------------------- | ------------------------ | ---------------------------- | ---------------------------------------- |
+| 80                      | NPM (HTTP)               | LAN + VPN                    | Redirect HTTP → HTTPS                    |
+| 443                     | NPM (HTTPS)              | LAN + VPN                    | All web services via reverse proxy       |
+| 19999                   | Netdata                  | Host network, LAN accessible | Metrics dashboard (also proxied via NPM) |
+| 3890                    | LLDAP                    | Docker internal network only | LDAP protocol (not exposed to LAN)       |
+| All other service ports | (Application containers) | Docker networks only         | Internal communication only              |
 
 ### Firewall Notes
 
@@ -148,8 +164,10 @@ VPN Client (remote)
 ### Network Definitions
 
 #### 1. `proxy` Network
+
 **Purpose**: HTTP/HTTPS traffic entry point
 **Services on this network**:
+
 - Nginx Proxy Manager (main traffic handler)
 - Authentik (for authentication checks)
 - Any services that need external HTTP access
@@ -157,8 +175,10 @@ VPN Client (remote)
 **Rationale**: NPM and Authentik sit on the proxy network to intercept and route traffic before it reaches backend services.
 
 #### 2. `identity` Network
+
 **Purpose**: Identity and authentication infrastructure
 **Services on this network**:
+
 - LLDAP (LDAP server)
 - Authentik server (processes auth requests)
 - Authentik worker (background jobs)
@@ -168,8 +188,10 @@ VPN Client (remote)
 **Rationale**: Isolated network for sensitive authentication data; only accessible to auth-aware services.
 
 #### 3. `apps` Network
+
 **Purpose**: Application services and their data stores
 **Services on this network**:
+
 - Nextcloud
 - Immich (server + ML)
 - Home Assistant
@@ -181,14 +203,17 @@ VPN Client (remote)
 ### Cross-Network Connectivity
 
 **PostgreSQL**: Joined to both `identity` and `apps` networks
+
 - Allows identity services (LLDAP, Authentik) to query their databases
 - Allows app services (Nextcloud, Immich) to query their databases
 
 **Redis**: Joined to both `identity` and `apps` networks
+
 - Allows Authentik to cache sessions and tokens
 - Allows apps to use Redis for caching and temporary data
 
 **Authentik**: Joined to both `proxy` and `identity` networks
+
 - Communicates with NPM over the proxy network for forward auth checks
 - Communicates with LLDAP and PostgreSQL over the identity network
 
@@ -199,30 +224,30 @@ VPN Client (remote)
 │                      Docker Host                            │
 ├─────────────────────────────────────────────────────────────┤
 │                                                             │
-│  ┌──────────────── proxy network ────────────────┐         │
-│  │                                                 │         │
-│  │  [Nginx Proxy Manager]  ←→  [Authentik]      │         │
-│  │                                                 │         │
-│  └──────────────────────────────────────────────┘         │
+│  ┌──────────────── proxy network ────────────────┐          │
+│  │                                               │          │
+│  │  [Nginx Proxy Manager]  ←→  [Authentik]       │          │
+│  │                                               │          │
+│  └─────────────────────────────────────────────-─┘          │
 │           ↑                                                 │
-│           │ (External traffic: ports 80, 443)             │
+│           │ (External traffic: ports 80, 443)                │
 │                                                             │
-│  ┌──────────────── identity network ────────────────┐      │
-│  │                                                   │      │
-│  │  [LLDAP] ←→ [Authentik] ←→ [PostgreSQL]        │      │
-│  │                              ←→ [Redis]         │      │
-│  │                                                   │      │
-│  └───────────────────────────────────────────────┘      │
-│                      ↑                                    │
-│          (Authentik bridges proxy & identity)          │
+│  ┌──────────────── identity network ────────────────┐       │
+│  │                                                  │       │
+│  │  [LLDAP] ←→ [Authentik] ←→ [PostgreSQL]          │       │
+│  │                              ←→ [Redis]          │       │
+│  │                                                  │       │
+│  └─────────────────────────────────────────────---──┘       │
+│                      ↑                                      │
+│          (Authentik bridges proxy & identity)               │
 │                                                             │
-│  ┌──────────────── apps network ────────────────────┐     │
-│  │                                                   │     │
-│  │  [Nextcloud]  ←→  [Immich]  ←→  [Home Assistant]│     │
-│  │       ↓              ↓              ↓             │     │
-│  │    [PostgreSQL] ←→ [Redis]                      │     │
-│  │                                                   │     │
-│  └───────────────────────────────────────────────┘     │
+│  ┌──────────────── apps network ────────────────────┐       │
+│  │                                                  │       │
+│  │  [Nextcloud]  ←→  [Immich]  ←→  [Home Assistant] │       │
+│  │       ↓              ↓              ↓            │       │
+│  │    [PostgreSQL] ←→ [Redis]                       │       │
+│  │                                                  │       │
+│  └─────────────────────────────────────────────---──┘       │
 │                                                             │
 └─────────────────────────────────────────────────────────────┘
 ```
@@ -301,7 +326,7 @@ services:
 ### Inbound (External/VPN Client → Homelab Service)
 
 ```
-1. Client queries UDR7 DNS for photo.in.alybadawy.com
+1. Client queries UDR7 DNS for photos.in.alybadawy.com
 2. UDR7 responds with homelab IP (172.20.20.5)
 3. Client initiates TLS to NPM (homelab:443)
 4. NPM terminates TLS, checks Host header
@@ -326,7 +351,7 @@ Example: Immich Server → PostgreSQL
 ### Service → Authentication Check
 
 ```
-1. NPM receives request, configured with forward auth for photo.in.alybadawy.com
+1. NPM receives request, configured with forward auth for photos.in.alybadawy.com
 2. NPM internally connects to Authentik (proxy network)
 3. Authentik validates session cookie/token
 4. Authentik responds with 200 OK + Remote-User header
