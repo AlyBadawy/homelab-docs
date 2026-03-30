@@ -9,14 +9,15 @@
 
 ## Core Infrastructure
 
-| Service | Image | Networks | Exposed Ports | Volumes | Subdomain |
-|---------|-------|----------|---------------|---------|-----------|
-| Dashboard | custom Rails app | proxy | 3000 (internal) | dashboard_data | `dashboard.in.alybadawy.com` |
-| NPM | jc21/nginx-proxy-manager:latest | proxy | 80, 443, 81 (host) | npm_data, certs volume | `proxy.in.alybadawy.com` (port 81 admin) |
-| Portainer | portainer/portainer-ce:latest | proxy | 9000 (internal to proxy net) | portainer_data, /var/run/docker.sock | `docker.in.alybadawy.com` |
-| Netdata | netdata/netdata:latest | host network | 19999 | host mounts (proc, sys, etc.) | `netdata.in.alybadawy.com` |
+| Service   | Image                           | Networks     | Exposed Ports                | Volumes                              | Subdomain                                |
+| --------- | ------------------------------- | ------------ | ---------------------------- | ------------------------------------ | ---------------------------------------- |
+| Dashboard | custom Rails app                | proxy        | 3000 (internal)              | dashboard_data                       | `dashboard.in.alybadawy.com`             |
+| NPM       | jc21/nginx-proxy-manager:latest | proxy        | 80, 443, 81 (host)           | npm_data, certs volume               | `proxy.in.alybadawy.com` (port 81 admin) |
+| Portainer | portainer/portainer-ce:latest   | proxy        | 9000 (internal to proxy net) | portainer_data, /var/run/docker.sock | `dockers.in.alybadawy.com``              |
+| Netdata   | netdata/netdata:latest          | host network | 19999                        | host mounts (proc, sys, etc.)        | `netdata.in.alybadawy.com`               |
 
 **Notes:**
+
 - Dashboard is a custom Rails application serving as the homelab landing page/control panel
 - NPM handles TLS termination and reverse proxying; wildcard cert deployed by acme.sh to shared `certs/` volume
 - Portainer is the primary orchestration interface for stack management
@@ -26,13 +27,14 @@
 
 ## Database Layer
 
-| Service | Image | Networks | Purpose | Notes |
-|---------|-------|----------|---------|-------|
-| PostgreSQL (Global) | postgres:16 | identity, apps | Multi-tenant database | One instance, multiple databases: authentik, nextcloud, lldap (optional) |
-| Redis (Global) | redis:7-alpine | identity, apps | Distributed caching | Shared instance, different DB indexes per service |
-| PostgreSQL (Immich) | ghcr.io/immich-app/postgres:latest | apps | Immich-specific database | Separate instance; pgvecto.rs extension required for vector similarity search |
+| Service             | Image                              | Networks       | Purpose                  | Notes                                                                         |
+| ------------------- | ---------------------------------- | -------------- | ------------------------ | ----------------------------------------------------------------------------- |
+| PostgreSQL (Global) | postgres:16                        | identity, apps | Multi-tenant database    | One instance, multiple databases: authentik, nextcloud, lldap (optional)      |
+| Redis (Global)      | redis:7-alpine                     | identity, apps | Distributed caching      | Shared instance, different DB indexes per service                             |
+| PostgreSQL (Immich) | ghcr.io/immich-app/postgres:latest | apps           | Immich-specific database | Separate instance; pgvecto.rs extension required for vector similarity search |
 
 **Notes:**
+
 - Global PostgreSQL: use `POSTGRES_MULTIPLE_DATABASES` init script to create separate databases
 - Redis: configure each service to use unique database index (0-15) to avoid key collisions
 - Immich PostgreSQL: must be on same network as Immich Server for pgvecto.rs functionality
@@ -41,13 +43,14 @@
 
 ## Identity Stack
 
-| Service | Image | Networks | Purpose | Notes |
-|---------|-------|----------|---------|-------|
-| LLDAP | lldap/lldap:stable | identity | LDAP directory | LDAP service on port 3890, Web UI on port 17170 |
-| Authentik Server | ghcr.io/goauthentik/server:latest | proxy, identity | OIDC/OAuth2 provider | Primary authentication backend for apps; sits behind NPM proxy |
-| Authentik Worker | ghcr.io/goauthentik/server:latest | identity | Background task processing | Needs `/var/run/docker.sock` mount for outpost management |
+| Service          | Image                             | Networks        | Purpose                    | Notes                                                          |
+| ---------------- | --------------------------------- | --------------- | -------------------------- | -------------------------------------------------------------- |
+| LLDAP            | lldap/lldap:stable                | identity        | LDAP directory             | LDAP service on port 3890, Web UI on port 17170                |
+| Authentik Server | ghcr.io/goauthentik/server:latest | proxy, identity | OIDC/OAuth2 provider       | Primary authentication backend for apps; sits behind NPM proxy |
+| Authentik Worker | ghcr.io/goauthentik/server:latest | identity        | Background task processing | Needs `/var/run/docker.sock` mount for outpost management      |
 
 **Notes:**
+
 - LLDAP provides LDAP interface for legacy app integration
 - Authentik Server connects to global PostgreSQL and Redis for session/config storage
 - Authentik Worker runs background sync, notification, and outpost tasks
@@ -57,14 +60,15 @@
 
 ## Applications
 
-| Service | Image | Networks | Purpose | Notes |
-|---------|-------|----------|---------|-------|
-| Nextcloud | nextcloud:latest | proxy, apps | File sync & collaboration | Data directory mounted from NAS via NFS; uses global PostgreSQL |
-| Immich Server | ghcr.io/immich-app/immich-server:release | proxy, apps | Photo/video library | Uses separate Immich PostgreSQL; library mounted from NAS via NFS |
-| Immich Machine Learning | ghcr.io/immich-app/immich-machine-learning:release | apps | ML inference (CPU) | Memory limited to 2GB; processes photo/video for recognition, classification, EXIF extraction |
-| Home Assistant | ghcr.io/home-assistant/home-assistant:stable | proxy | Home automation hub | Runs on host network or bridged with port 8123; requires host access for certain integrations |
+| Service                 | Image                                              | Networks    | Purpose                   | Notes                                                                                         |
+| ----------------------- | -------------------------------------------------- | ----------- | ------------------------- | --------------------------------------------------------------------------------------------- |
+| Nextcloud               | nextcloud:latest                                   | proxy, apps | File sync & collaboration | Data directory mounted from NAS via NFS; uses global PostgreSQL                               |
+| Immich Server           | ghcr.io/immich-app/immich-server:release           | proxy, apps | Photo/video library       | Uses separate Immich PostgreSQL; library mounted from NAS via NFS                             |
+| Immich Machine Learning | ghcr.io/immich-app/immich-machine-learning:release | apps        | ML inference (CPU)        | Memory limited to 2GB; processes photo/video for recognition, classification, EXIF extraction |
+| Home Assistant          | ghcr.io/home-assistant/home-assistant:stable       | proxy       | Home automation hub       | Runs on host network or bridged with port 8123; requires host access for certain integrations |
 
 **Notes:**
+
 - All app containers authenticate via Authentik OAuth2/OIDC proxy (NPM)
 - NFS mounts to `/mnt/nas/{nextcloud,immich}` must be mounted on host before container start
 - Immich ML container is CPU-bound; consider pinning to specific cores on high-core systems
@@ -117,11 +121,13 @@
 ## Secrets Management
 
 **Critical:** Each stack directory with sensitive configuration contains a `.env` file that is:
+
 - **Never committed to git** (add to .gitignore)
 - **Backed up to a password manager** (1Password, Bitwarden, etc.)
 - **Referenced in docker-compose.yml** via `env_file: .env` or inline `${VAR_NAME}`
 
 Example `.env` structure:
+
 ```bash
 # identity/lldap/.env
 LLDAP_LDAP_USER_PASS=<strong-random-password>

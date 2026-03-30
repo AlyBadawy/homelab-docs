@@ -1,28 +1,32 @@
-# Identity Stack Deployment Guide
+# 06 — Identity Stack
 
-Complete guide to deploying LLDAP and Authentik for centralized identity and authentication across your homelab.
+Complete guide to deploying LLDAP and Authentik for centralized identity and authentication across the homelab.
 
 ## Prerequisites
 
-- Docker networks: `identity` (pre-created)
-- PostgreSQL running on `identity` network (container name: `postgres`)
-- Redis running on `identity` network (container name: `redis`)
-- NPM with wildcard cert configured for `*.in.alybadawy.com`
-- Stack directory structure in place: `/opt/stacks/identity/`
+- Guide 05 complete — NPM, PostgreSQL, and Redis running
+- Docker networks: `identity` and `proxy` present
+- PostgreSQL `authentik` database created by the init script
 
-## Section 1: LLDAP Deployment
+> **How to deploy a stack in Portainer:** Go to **Stacks → + Add stack**, enter the stack name shown, paste the compose content into the **Web editor**, add environment variables in the **Environment variables** section below the editor, then click **Deploy the stack**.
 
-LLDAP is a lightweight LDAP server that acts as your user directory. All homelab services will authenticate against it through Authentik.
+---
 
-**LLDAP Configuration:**
-- Base DN: `dc=inside,dc=alybadawy,dc=com`
-- Admin user: `admin` (LDAP directory admin, not an app user)
-- Web UI domain: `lldap.in.alybadawy.com` (optional but recommended)
-- LDAP port: `3890` (internal only, no external access needed)
+## Section 1: LLDAP
 
-### Step 1: Create LLDAP Docker Compose File
+Stack name: `lldap`
 
-Create `/opt/stacks/identity/lldap/docker-compose.yml`:
+LLDAP is a lightweight LDAP server — the user directory for the homelab. All accounts are created here and flow into Authentik.
+
+**Configuration:**
+- Base DN: `dc=in,dc=alybadawy,dc=com`
+- Web UI: `lldap.in.alybadawy.com`
+- LDAP port: `3890` (internal only)
+- Admin user: `admin` (directory admin, not an app account)
+
+### Step 1: Deploy LLDAP
+
+In Portainer, create a new stack named `lldap` with the following compose content:
 
 ```yaml
 services:
@@ -30,14 +34,12 @@ services:
     image: lldap/lldap:stable
     container_name: lldap
     restart: unless-stopped
-    ports:
-      - "3890:3890"   # LDAP — only accessible within Docker network
     volumes:
       - lldap_data:/data
     environment:
       - LLDAP_JWT_SECRET=${LLDAP_JWT_SECRET}
       - LLDAP_LDAP_USER_PASS=${LLDAP_ADMIN_PASSWORD}
-      - LLDAP_LDAP_BASE_DN=dc=inside,dc=alybadawy,dc=com
+      - LLDAP_LDAP_BASE_DN=dc=in,dc=alybadawy,dc=com
       - LLDAP_HTTP_PORT=17170
       - LLDAP_LDAP_PORT=3890
     networks:
@@ -51,85 +53,59 @@ networks:
     external: true
 ```
 
-### Step 2: Create LLDAP Environment File
+In the **Environment variables** section, add:
 
-Create `/opt/stacks/identity/lldap/.env`:
+| Variable | Value |
+|----------|-------|
+| `LLDAP_JWT_SECRET` | *(64-char random secret — run `openssl rand -hex 32`)* |
+| `LLDAP_ADMIN_PASSWORD` | *(strong password — store in password manager)* |
 
-```env
-LLDAP_JWT_SECRET=CHANGE_ME_random_64_char_secret
-LLDAP_ADMIN_PASSWORD=CHANGE_ME_strong_lldap_admin_password
-```
+Click **Deploy the stack**. Check **Containers → lldap → Logs**. Expected: `LLDAP successfully started!`
 
-**Generate secure secrets:**
+### Step 2: Configure NPM Proxy for LLDAP
 
-```bash
-# Generate JWT secret (64 hex chars)
-openssl rand -hex 32
+In NPM → **Proxy Hosts → Add Proxy Host**:
 
-# Use a strong password for admin account (min 12 chars, mixed case + numbers + symbols)
-```
-
-⚠️ **Security Warning:** The `LLDAP_ADMIN_PASSWORD` is sensitive. Store it in a password manager. This is the directory admin account, not a user account.
-
-### Step 3: Deploy LLDAP via Portainer
-
-In Portainer, go to **Stacks → + Add stack**:
-- **Name:** `lldap`
-- **Web editor:** paste the compose file above
-- Click **Deploy the stack**
-
-Verify in Portainer under **Containers → lldap → Logs**. Expected: `LLDAP successfully started!`
-
-### Step 4: Configure NPM Proxy for LLDAP Web UI
-
-In Nginx Proxy Manager, add a new proxy host:
-
-- **Domain Name:** `lldap.in.alybadawy.com`
+- **Domain Names:** `lldap.in.alybadawy.com`
 - **Scheme:** `http`
 - **Forward Hostname/IP:** `lldap`
 - **Forward Port:** `17170`
-- **SSL Certificate:** Select wildcard cert for `in.alybadawy.com`
+- **SSL Certificate:** `wildcard-in-alybadawy-com`
 - **Force SSL:** On
 - **HTTP/2 Support:** On
 
-### Step 5: Initialize LLDAP
+### Step 3: Initialize LLDAP
 
-Access the web UI at `https://lldap.in.alybadawy.com`
+Access `https://lldap.in.alybadawy.com` and log in:
+- Username: `admin`
+- Password: *(the `LLDAP_ADMIN_PASSWORD` you set)*
 
-1. **Login** with credentials:
-   - Username: `admin`
-   - Password: (the `LLDAP_ADMIN_PASSWORD` from your `.env`)
+**Create user groups** (navigate to Groups):
+- `homelab_users` — standard access to services
+- `homelab_admins` — elevated/admin access across services
 
-2. **Create user groups** (in the UI, navigate to Groups):
-   - `homelab_users` — users with standard access to services
-   - `homelab_admins` — users with elevated/admin access across services
+**Create your personal account** (Groups → Users → Add User):
+- Set your username and a strong password
+- Add to both `homelab_users` and `homelab_admins`
 
-3. **Create your personal user account** (Groups → Users → Add User):
-   - Example: Username `aly`
-   - Set a strong password
-   - **Important:** Check "User is admin" to make this account a directory admin
-
-4. **Add yourself to both groups:**
-   - Click your user → Edit → Group memberships
-   - Add to `homelab_users` and `homelab_admins`
-
-Your LLDAP directory is now ready. Users created here will sync to Authentik in the next section.
+Your LLDAP directory is ready. Users created here sync into Authentik.
 
 ---
 
-## Section 2: Authentik Deployment
+## Section 2: Authentik
 
-Authentik is your central authentication platform. It connects to LLDAP for user/group data and provides OIDC/OAuth2 login for all your applications.
+Stack name: `authentik`
 
-**Authentik Configuration:**
+Authentik is the central authentication platform — it connects to LLDAP for user data and provides OIDC/OAuth2 login for all services.
+
+**Configuration:**
 - Domain: `auth.in.alybadawy.com`
-- Admin panel port: `9000`
-- Connects to PostgreSQL and Redis on the `identity` network
-- Uses LLDAP as the user directory source
+- PostgreSQL database: `authentik` (created in Guide 05 init script)
+- Redis: shared instance on `identity` network
 
-### Step 1: Create Authentik Docker Compose File
+### Step 1: Deploy Authentik
 
-Create `/opt/stacks/identity/authentik/docker-compose.yml`:
+In Portainer, create a new stack named `authentik` with the following compose content:
 
 ```yaml
 services:
@@ -152,8 +128,6 @@ services:
     networks:
       - proxy
       - identity
-    depends_on:
-      - authentik-worker
 
   authentik-worker:
     image: ghcr.io/goauthentik/server:latest
@@ -185,207 +159,117 @@ networks:
     external: true
 ```
 
-### Step 2: Create Authentik Environment File
+In the **Environment variables** section, add:
 
-Create `/opt/stacks/identity/authentik/.env`:
+| Variable | Value |
+|----------|-------|
+| `AUTHENTIK_SECRET_KEY` | *(64-char random secret — run `openssl rand -hex 32`)* |
+| `AUTHENTIK_DB_PASSWORD` | *(must match the password set in the PostgreSQL init SQL for user `authentik`)* |
 
-```env
-AUTHENTIK_SECRET_KEY=CHANGE_ME_random_64_char_secret
-AUTHENTIK_DB_PASSWORD=CHANGE_ME_authentik_db_password
-```
+Click **Deploy the stack**. Wait ~1 minute for DB migrations. Check **Containers → authentik-server → Logs**. Watch for: `Starting application server for authentik...`
 
-**Generate secrets:**
+### Step 2: Configure NPM Proxy for Authentik
 
-```bash
-# Generate secret key (64 hex chars)
-openssl rand -hex 32
+In NPM → **Proxy Hosts → Add Proxy Host**:
 
-# DB password should be strong (min 16 chars recommended)
-```
-
-⚠️ **Security Warning:** Both values are cryptographic secrets. Store in password manager and never commit to version control.
-
-### Step 3: Deploy Authentik via Portainer
-
-In Portainer, go to **Stacks → + Add stack**:
-- **Name:** `authentik`
-- **Web editor:** paste the compose file above
-- Click **Deploy the stack**
-
-Wait about 1 minute for migrations to complete. Check **Containers → authentik-server → Logs** in Portainer. Watch for: `Starting application server for authentik...`
-
-### Step 4: Configure NPM Proxy for Authentik
-
-In Nginx Proxy Manager, add a new proxy host:
-
-- **Domain Name:** `auth.in.alybadawy.com`
+- **Domain Names:** `auth.in.alybadawy.com`
 - **Scheme:** `http`
 - **Forward Hostname/IP:** `authentik-server`
 - **Forward Port:** `9000`
-- **SSL Certificate:** Select wildcard cert for `in.alybadawy.com`
+- **SSL Certificate:** `wildcard-in-alybadawy-com`
 - **Force SSL:** On
 - **HTTP/2 Support:** On
-- **Websockets Support:** On (toggle in NPM)
+- **Websockets Support:** On
 
-### Step 5: Complete Authentik Initial Setup
+### Step 3: Complete Authentik Initial Setup
 
 Access `https://auth.in.alybadawy.com/if/flow/initial-setup/`
 
-1. **Create the akadmin account:**
-   - Username: `akadmin`
-   - Password: Set a very strong password (20+ chars, all types)
-   - **Store this password securely** — it's the Authentik super-admin
+1. Create the `akadmin` account with a very strong password (20+ chars)
+2. **Store this password securely** — it's the Authentik super-admin
+3. After setup, click the avatar icon → **Admin Interface**
 
-⚠️ **Security Warning:** The akadmin account has complete control over Authentik and all integrated services. Protect this password like a root password.
-
-2. **Access the Admin Interface:**
-   - After setup completes, click the avatar icon in the top right
-   - Select "Admin Interface"
-
-Your Authentik server is running. Now you'll connect it to LLDAP.
+⚠️ The `akadmin` account has complete control over Authentik and all integrated services.
 
 ---
 
 ## Section 3: Connect Authentik to LLDAP
 
-This step makes LLDAP the source of truth for user and group data in Authentik.
+This makes LLDAP the source of truth for users and groups in Authentik.
 
-### Step 1: Add LLDAP as an LDAP Source
+In **Authentik Admin Interface → Directory → Federation & Social Login**:
 
-In the **Authentik Admin Interface:**
-
-1. Navigate to **Directory** → **Federation & Social Login**
-2. Click **Create** → **LDAP Source**
-3. Fill in the following:
+1. Click **Create → LDAP Source**
+2. Fill in:
 
 | Setting | Value |
 |---------|-------|
 | **Name** | `LLDAP` |
 | **Slug** | `lldap` |
 | **Server URI** | `ldap://lldap:3890` |
-| **Bind CN** | `cn=admin,ou=people,dc=inside,dc=alybadawy,dc=com` |
-| **Bind Password** | (your `LLDAP_ADMIN_PASSWORD`) |
-| **Base DN for User search** | `dc=inside,dc=alybadawy,dc=com` |
-| **Base DN for Group search** | `dc=inside,dc=alybadawy,dc=com` |
+| **Bind CN** | `cn=admin,ou=people,dc=in,dc=alybadawy,dc=com` |
+| **Bind Password** | *(your `LLDAP_ADMIN_PASSWORD`)* |
+| **Base DN for User search** | `dc=in,dc=alybadawy,dc=com` |
+| **Base DN for Group search** | `dc=in,dc=alybadawy,dc=com` |
 | **User object filter** | `(|(uid=*)(cn=*))` |
 | **Group object filter** | `(|(objectClass=groupOfNames)(objectClass=groupOfUniqueNames))` |
 | **Group membership field** | `member` |
 
-4. Under **Sync** settings:
-   - **Sync users** → Toggle ON
-   - **Sync groups** → Toggle ON
-   - **Sync parent group** → Leave blank
-   - **User path prefix** → `authentik built-in/sources/ldap/`
-   - **Group path prefix** → `authentik built-in/sources/ldap/`
+3. Under **Sync** settings, enable **Sync users** and **Sync groups**
+4. Click **Create**
+5. Open the LDAP source → **Sync** tab → **Run sync now**
 
-5. Click **Create**
-
-### Step 2: Run Initial LDAP Sync
-
-1. In the LDAP source you just created, click the **Sync** tab
-2. Click **Run sync now**
-3. Watch the Authentik logs for sync messages:
-
-```bash
-docker logs -f authentik-server | grep -i ldap
-```
-
-Expected: Your LLDAP users and groups appear in Authentik's **Directory** → **Users** and **Groups** sections.
-
-Your LDAP source is now syncing users and groups to Authentik. Users will sync automatically on login going forward.
+Verify your LLDAP users and groups appear in Authentik under **Directory → Users** and **Groups**.
 
 ---
 
-## Section 4: Create OIDC Providers for Applications
+## Section 4: Create OIDC Providers
 
-For each service that will authenticate through Authentik (Nextcloud, Immich, Home Assistant, etc.), you need to create an OIDC/OAuth2 provider.
+For each service that authenticates through Authentik, create an OIDC provider. You'll do this per-service in Guide 07, but the general flow is:
 
-### General OIDC Provider Setup
+In **Authentik Admin → Applications → Providers**:
 
-In **Authentik Admin Interface** → **Applications** → **Providers**:
-
-1. Click **Create** → **OAuth2/OpenID Connect Provider**
-
-2. **Basic Settings:**
-   - **Name:** (e.g., "Nextcloud OIDC" or "Immich OIDC")
-   - **Authorization flow:** (Keep default)
-   - **Client type:** `Confidential`
-
-3. **Protocol Settings:**
-   - **Client ID:** (Auto-generated, or set custom)
-   - **Redirect URIs/Origins:** (Application-specific, see below)
-
-4. **Advanced Protocol Settings:**
-   - **Signing Key:** (Keep default)
-   - Leave other settings at defaults
-
+1. **Create → OAuth2/OpenID Connect Provider**
+2. **Name:** (e.g., `Nextcloud OIDC`)
+3. **Client Type:** `Confidential`
+4. **Redirect URIs:** (application-specific — see Guide 07)
 5. Click **Create**
-
-6. **Save the credentials:**
-   - Copy the **Client ID**
-   - Click the eye icon to reveal **Client Secret**
-   - Store both securely — you'll need them in each application's configuration
-
-⚠️ **Security Warning:** Client Secrets are sensitive cryptographic credentials. Never commit them to git or share them. Store in `.env` files outside version control.
-
-### Redirect URIs by Application
-
-Each application will need a specific Redirect URI. You'll create the OIDC provider with the correct URI when deploying each service (see next guide).
+6. Copy the **Client ID** and **Client Secret** — you'll need them in the app configuration
 
 ---
 
 ## Verification Checklist
 
-Before moving to the next deployment guide, verify:
-
-- [ ] LLDAP is running: `docker ps | grep lldap`
-- [ ] LLDAP web UI accessible: `https://lldap.in.alybadawy.com` (login works)
-- [ ] User directory has your account + groups created
-- [ ] Authentik is running: `docker ps | grep authentik`
-- [ ] Authentik accessible: `https://auth.in.alybadawy.com` (login as akadmin works)
-- [ ] LDAP source synced: Users visible in Authentik Directory
-- [ ] Created OIDC providers for planned services (or will do per-service)
+- [ ] LLDAP running: check Portainer Containers list
+- [ ] LLDAP web UI: `https://lldap.in.alybadawy.com` loads and login works
+- [ ] Your user account + groups created in LLDAP
+- [ ] Authentik running: check Portainer Containers list
+- [ ] Authentik accessible: `https://auth.in.alybadawy.com` loads
+- [ ] LDAP sync complete: users visible in Authentik **Directory → Users**
 
 ---
 
 ## Troubleshooting
 
 **LLDAP won't start:**
+
 ```bash
-# Check logs
 docker logs lldap
-
-# Verify network exists
 docker network ls | grep identity
-
-# Re-create if needed
-docker network create identity
 ```
-
-**Can't reach LLDAP web UI:**
-- Verify NPM proxy is configured and SSL cert is valid
-- Check LLDAP container is on the `identity` network: `docker inspect lldap | grep identity`
 
 **Authentik stuck on startup:**
-```bash
-# Wait longer (up to 2 minutes for DB migrations)
-docker logs authentik-server | tail -20
 
-# Check database connectivity
-docker exec authentik-server /bin/bash -c "psql -h postgres -U authentik -d authentik -c 'SELECT 1'"
+```bash
+docker logs authentik-server | tail -20
 ```
 
+Wait up to 2 minutes for DB migrations. Check that the `AUTHENTIK_DB_PASSWORD` matches what was set in the PostgreSQL init SQL.
+
 **LDAP sync not working:**
-- Verify LLDAP admin password is correct in Authentik LDAP source config
-- Check LLDAP logs: `docker logs lldap | grep -i ldap`
-- Manually verify LDAP connectivity: `docker exec authentik-server ldapsearch -x -H ldap://lldap:3890 -D cn=admin,ou=people,dc=inside,dc=alybadawy,dc=com -b dc=inside,dc=alybadawy,dc=com`
 
----
+```bash
+docker logs lldap | grep -i ldap
+```
 
-## Next Steps
-
-Your identity stack is ready. Proceed to **07-application-services.md** to deploy:
-- Nextcloud with OIDC login
-- Immich with OIDC login
-- Home Assistant with OAuth2 login
-- Portainer integration
+Verify the Bind CN and password in the Authentik LDAP source config exactly match your LLDAP admin credentials.

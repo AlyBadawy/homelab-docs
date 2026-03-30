@@ -50,7 +50,7 @@ This repository is the single source of truth for the homelab server — coverin
 | ------------------- | --------------------------------------------- | ---------------------------- |
 | Dashboard           | Homelab dashboard app running Rails           | `dashboard.in.alybadawy.com` |
 | Nginx Proxy Manager | Reverse proxy + SSL termination               | `proxy.in.alybadawy.com`     |
-| Portainer           | Docker container management                   | `docker.in.alybadawy.com`    |
+| Portainer           | Docker container management                   | `dockers.in.alybadawy.com``  |
 | Netdata             | System monitoring (CPU/RAM/disk/network)      | `netdata.in.alybadawy.com`   |
 | Authentik           | SSO / Identity Provider (OIDC + LDAP outpost) | `auth.in.alybadawy.com`      |
 | Nextcloud           | Self-hosted file sync and productivity        | `cloud.in.alybadawy.com`     |
