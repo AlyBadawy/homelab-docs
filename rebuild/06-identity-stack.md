@@ -71,17 +71,14 @@ openssl rand -hex 32
 
 ⚠️ **Security Warning:** The `LLDAP_ADMIN_PASSWORD` is sensitive. Store it in a password manager. This is the directory admin account, not a user account.
 
-### Step 3: Start LLDAP Container
+### Step 3: Deploy LLDAP via Portainer
 
-```bash
-cd /opt/stacks/identity/lldap
-docker compose up -d
+In Portainer, go to **Stacks → + Add stack**:
+- **Name:** `lldap`
+- **Web editor:** paste the compose file above
+- Click **Deploy the stack**
 
-# Verify it's running
-docker logs lldap
-```
-
-Expected output: `LLDAP successfully started!`
+Verify in Portainer under **Containers → lldap → Logs**. Expected: `LLDAP successfully started!`
 
 ### Step 4: Configure NPM Proxy for LLDAP Web UI
 
@@ -208,17 +205,14 @@ openssl rand -hex 32
 
 ⚠️ **Security Warning:** Both values are cryptographic secrets. Store in password manager and never commit to version control.
 
-### Step 3: Start Authentik Services
+### Step 3: Deploy Authentik via Portainer
 
-```bash
-cd /opt/stacks/identity/authentik
-docker compose up -d
+In Portainer, go to **Stacks → + Add stack**:
+- **Name:** `authentik`
+- **Web editor:** paste the compose file above
+- Click **Deploy the stack**
 
-# Wait for migrations to complete (about 1 minute)
-docker logs -f authentik-server
-```
-
-Watch for message: `Starting application server for authentik...`
+Wait about 1 minute for migrations to complete. Check **Containers → authentik-server → Logs** in Portainer. Watch for: `Starting application server for authentik...`
 
 ### Step 4: Configure NPM Proxy for Authentik
 

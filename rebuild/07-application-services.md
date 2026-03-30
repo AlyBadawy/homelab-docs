@@ -86,17 +86,14 @@ mkdir -p /mnt/nas/homelab/cloudnext
 chmod 755 /mnt/nas/homelab/cloudnext
 ```
 
-### Step 4: Start Nextcloud
+### Step 4: Deploy Nextcloud via Portainer
 
-```bash
-cd /opt/stacks/apps/nextcloud
-docker compose up -d
+In Portainer, go to **Stacks → + Add stack**:
+- **Name:** `nextcloud`
+- **Web editor:** paste the compose file above
+- Click **Deploy the stack**
 
-# Wait for initialization (1-2 minutes)
-docker logs -f nextcloud
-```
-
-Watch for: `New nextcloud instance initialized`
+Wait 1–2 minutes for initialization. Check **Containers → nextcloud → Logs** in Portainer. Watch for: `New nextcloud instance initialized`
 
 ### Step 5: Configure NPM Proxy for Nextcloud
 
@@ -278,17 +275,14 @@ mkdir -p /mnt/nas/homelab/immich
 chmod 755 /mnt/nas/homelab/immich
 ```
 
-### Step 4: Start Immich Services
+### Step 4: Deploy Immich via Portainer
 
-```bash
-cd /opt/stacks/apps/immich
-docker compose up -d
+In Portainer, go to **Stacks → + Add stack**:
+- **Name:** `immich`
+- **Web editor:** paste the compose file above
+- Click **Deploy the stack**
 
-# Wait for database initialization (2-3 minutes)
-docker logs -f immich-server
-```
-
-Watch for: `Immich Server is running...`
+Wait 2–3 minutes for database initialization. Check **Containers → immich-server → Logs** in Portainer. Watch for: `Immich Server is running...`
 
 ### Step 5: Configure NPM Proxy for Immich
 
@@ -397,17 +391,14 @@ volumes:
 
 **Why `network_mode: host`?** Home Assistant needs direct access to mDNS (multicast DNS) and other network protocols to discover smart home devices. Docker bridge networking breaks these features.
 
-### Step 2: Start Home Assistant
+### Step 2: Deploy Home Assistant via Portainer
 
-```bash
-cd /opt/stacks/apps/homeassistant
-docker compose up -d
+In Portainer, go to **Stacks → + Add stack**:
+- **Name:** `homeassistant`
+- **Web editor:** paste the compose file above
+- Click **Deploy the stack**
 
-# Wait for startup (2-3 minutes)
-docker logs -f homeassistant
-```
-
-Watch for: `Home Assistant started at` or similar.
+Wait 2–3 minutes for startup. Check **Containers → homeassistant → Logs** in Portainer. Watch for: `Home Assistant started at` or similar.
 
 ### Step 3: Complete Initial Onboarding
 

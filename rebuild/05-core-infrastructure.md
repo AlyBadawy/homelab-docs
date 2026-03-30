@@ -1,11 +1,12 @@
-# Core Infrastructure Guide: NPM, Portainer, Netdata, and Databases
+# 05 — Core Infrastructure
 
-This guide covers deploying the core services of the homelab: Nginx Proxy Manager, Portainer (container orchestration), Netdata (monitoring), and the shared database layer (PostgreSQL and Redis).
+This guide deploys NPM (reverse proxy), Netdata (monitoring), and the shared database layer (PostgreSQL and Redis). All services are deployed as Portainer stacks.
 
 **Prerequisites:**
-- Docker networks created (see guide 02): `proxy`, `identity`, `apps`
-- SSL certificates issued (see guide 03): wildcard cert for `*.in.alybadawy.com`
-- Stack directories: `/opt/stacks/proxy/npm/`, `/opt/stacks/core/`, `/opt/stacks/db/`
+- Guide 03 complete — Docker installed, networks created, Portainer running at `http://172.20.20.5:9000`
+- Guide 04 complete — wildcard cert for `*.in.alybadawy.com` in `/opt/stacks/proxy/npm/certs/`
+
+> **How to deploy a stack in Portainer:** Go to **Stacks → + Add stack**, give it a name, paste the compose file content into the **Web editor**, then click **Deploy the stack**.
 
 ---
 
@@ -55,20 +56,14 @@ networks:
 - `443:443` — HTTPS traffic (where the wildcard cert terminates)
 - `81:81` — NPM admin panel (web UI for managing proxy hosts)
 
-### 1.2: Start NPM
+### 1.2: Deploy NPM via Portainer
 
-```bash
-cd /opt/stacks/proxy/npm
-docker compose up -d
-```
+In Portainer, go to **Stacks → + Add stack**:
+- **Name:** `npm`
+- **Web editor:** paste the compose file above
+- Click **Deploy the stack**
 
-Verify it's running:
-
-```bash
-docker ps | grep npm
-```
-
-Wait 10–15 seconds for NPM to initialize its database.
+Wait 10–15 seconds for NPM to initialize its database. Verify in Portainer under **Containers** that `npm` is running.
 
 ### 1.3: Initial Login
 
@@ -165,87 +160,23 @@ Once NPM is proxying itself, you don't need direct access to port 81. Disable it
 
 ---
 
-## Section 2: Portainer
+## Section 2: Portainer Proxy Host
 
-Portainer is a web-based UI for managing Docker containers, images, volumes, and networks across your homelab.
-
-### 2.1: Create Portainer Compose File
-
-Create the Portainer directories:
-
-```bash
-mkdir -p /opt/stacks/core/portainer
-cd /opt/stacks/core/portainer
-```
-
-Create `/opt/stacks/core/portainer/docker-compose.yml`:
-
-```yaml
-services:
-  portainer:
-    image: portainer/portainer-ce:latest
-    container_name: portainer
-    restart: unless-stopped
-    volumes:
-      - /var/run/docker.sock:/var/run/docker.sock
-      - portainer_data:/data
-    networks:
-      - proxy
-    environment:
-      INITIAL_ADMIN_PASSWORD: ""  # Will be set on first access
-
-volumes:
-  portainer_data:
-
-networks:
-  proxy:
-    external: true
-```
-
-### 2.2: Start Portainer
-
-```bash
-cd /opt/stacks/core/portainer
-docker compose up -d
-```
-
-Verify it's running:
-
-```bash
-docker ps | grep portainer
-```
-
-### 2.3: Create NPM Proxy Host for Portainer
-
-Add a proxy host in NPM to route `docker.in.alybadawy.com` to the Portainer container.
+Portainer is already running (deployed in Guide 03). Add an NPM proxy host so it's accessible at `https://docker.in.alybadawy.com`.
 
 1. Go to NPM admin → **Proxy Hosts** → **Add Proxy Host**
-2. Fill in the **Details** tab:
+2. **Details** tab:
    - **Domain Names:** `docker.in.alybadawy.com`
    - **Scheme:** `http`
    - **Forward Hostname/IP:** `portainer`
    - **Forward Port:** `9000`
-   - **Cache Assets:** On
    - **Block Common Exploits:** On
-3. Click the **SSL** tab:
-   - **SSL Certificate:** `wildcard-inside-alybadawy-com`
+3. **SSL** tab:
+   - **SSL Certificate:** `wildcard-in-alybadawy-com`
    - **Force SSL:** On
 4. Click **Save**
 
-### 2.4: Initial Setup
-
-Access Portainer:
-
-```
-https://docker.in.alybadawy.com
-```
-
-On first access, you'll be prompted to create an admin account:
-1. Set an admin username (e.g., `admin`)
-2. Set a strong password
-3. Click **Create user**
-
-Portainer will connect to the local Docker daemon and show all containers, images, and volumes.
+Portainer is now accessible at `https://docker.in.alybadawy.com`.
 
 ---
 
@@ -302,20 +233,14 @@ volumes:
 - **Capabilities and security:** Required to monitor system metrics without full root access
 - **Volume mounts:** Read-only access to host system files and Docker socket
 
-### 3.2: Start Netdata
+### 3.2: Deploy Netdata via Portainer
 
-```bash
-cd /opt/stacks/core/netdata
-docker compose up -d
-```
+In Portainer, go to **Stacks → + Add stack**:
+- **Name:** `netdata`
+- **Web editor:** paste the compose file above
+- Click **Deploy the stack**
 
-Verify it's running:
-
-```bash
-docker ps | grep netdata
-```
-
-Wait 5–10 seconds for Netdata to initialize and gather metrics.
+Wait 5–10 seconds for Netdata to initialize and gather metrics. Verify in Portainer under **Containers** that `netdata` is running.
 
 ### 3.3: Test Direct Access
 
@@ -499,39 +424,19 @@ networks:
 
 Services can connect to Redis at `redis:6379`.
 
-### 4.5: Start PostgreSQL and Redis
+### 4.5: Deploy PostgreSQL and Redis via Portainer
 
-Start PostgreSQL:
+Deploy PostgreSQL first — in Portainer, go to **Stacks → + Add stack**:
+- **Name:** `postgres`
+- **Web editor:** paste the PostgreSQL compose file above
+- Click **Deploy the stack**
 
-```bash
-cd /opt/stacks/db/postgres
-docker compose up -d
-```
+Check logs in Portainer under **Containers → postgres → Logs** for any initialization errors. Wait for the healthcheck to show `healthy` in the Containers list.
 
-Check logs for any initialization errors:
-
-```bash
-docker logs postgres
-```
-
-Wait for PostgreSQL to be ready (the healthcheck will show `healthy`):
-
-```bash
-docker ps --format "table {{.Names}}\t{{.Status}}" | grep postgres
-```
-
-Start Redis:
-
-```bash
-cd /opt/stacks/db/redis
-docker compose up -d
-```
-
-Verify both are running:
-
-```bash
-docker ps --format "table {{.Names}}\t{{.Status}}" | grep -E "postgres|redis"
-```
+Then deploy Redis — in Portainer, go to **Stacks → + Add stack**:
+- **Name:** `redis`
+- **Web editor:** paste the Redis compose file above
+- Click **Deploy the stack**
 
 ### 4.6: Verify Database Connectivity
 

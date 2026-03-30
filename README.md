@@ -85,9 +85,9 @@ This repository is the single source of truth for the homelab server — coverin
 
 1. [OS Installation](rebuild/01-os-installation.md)
 2. [NAS Mounts (NFS — must run before Docker)](rebuild/02-nas-mounts.md)
-3. [Docker Setup](rebuild/03-docker-setup.md)
+3. [Docker + Portainer](rebuild/03-docker-setup.md)
 4. [SSL Certificates (acme.sh + Vercel DNS)](rebuild/04-ssl-certificates.md)
-5. [Core Infrastructure (NPM, Portainer, Netdata)](rebuild/05-core-infrastructure.md)
+5. [Core Infrastructure (NPM, Netdata, PostgreSQL, Redis)](rebuild/05-core-infrastructure.md)
 6. [Identity Stack (LLDAP + Authentik)](rebuild/06-identity-stack.md)
 7. [Application Services (Nextcloud, Immich, Home Assistant)](rebuild/07-application-services.md)
 
