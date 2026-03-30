@@ -1,10 +1,11 @@
 # SSL/TLS Certificates Guide: Wildcard Certs with acme.sh and Vercel DNS
 
-This guide covers setting up wildcard TLS certificates for `*.in.alybadawy.com` using acme.sh with the Vercel DNS plugin. The DNS-01 challenge is used because the homelab is not publicly exposed.
+This guide covers setting up TLS certificates for `in.alybadawy.com` and `*.in.alybadawy.com` using acme.sh with the Vercel DNS plugin. The DNS-01 challenge is used because the homelab is not publicly exposed.
 
 **Environment:**
+
 - Domain: `alybadawy.com` (DNS managed by Vercel)
-- Target certificate: `*.in.alybadawy.com`
+- Target certificate: `in.alybadawy.com` and `*.in.alybadawy.com` (SAN cert)
 - acme.sh runs on Ubuntu host (not containerized)
 - Certificates deployed to: `/opt/stacks/proxy/npm/certs/`
 - Certificate manager: Nginx Proxy Manager (NPM)
@@ -28,7 +29,14 @@ Store the token securely. You'll use it in Step 3.
 
 ## Step 2: Install acme.sh on the Ubuntu Host
 
-Run the installation script:
+Ubuntu Server 24.04 minimal does not include `cron` by default. acme.sh requires it to schedule automatic certificate renewals. Install it first:
+
+```bash
+sudo apt install -y cron
+sudo systemctl enable cron
+```
+
+Then run the acme.sh installation script:
 
 ```bash
 curl https://get.acme.sh | sh -s email=alybadawy@icloud.com
@@ -55,7 +63,7 @@ Verify installation:
 Export your Vercel API token so acme.sh can authenticate:
 
 ```bash
-export VERCEL_API_TOKEN="your_token_here"
+export VERCEL_TOKEN="your_token_here"
 ```
 
 Replace `your_token_here` with the token from Step 1.
@@ -64,24 +72,27 @@ acme.sh will save this token to `~/.acme.sh/account.conf` automatically after th
 
 ---
 
-## Step 4: Issue the Wildcard Certificate
+## Step 4: Issue the Certificate
 
-Request the wildcard certificate using the Vercel DNS plugin:
+Request a SAN certificate covering both the root subdomain and the wildcard:
 
 ```bash
 ~/.acme.sh/acme.sh --issue \
   --dns dns_vercel \
+  -d "in.alybadawy.com" \
   -d "*.in.alybadawy.com" \
   --server letsencrypt
 ```
 
+> The first `-d` is the primary domain; the second is the wildcard SAN. Both are included in the same certificate, so a single cert covers `in.alybadawy.com` itself and every subdomain under it.
+
 **What happens:**
+
 1. acme.sh contacts Let's Encrypt to begin the DNS-01 challenge
-2. acme.sh adds a temporary TXT record to your Vercel DNS (under `in.alybadawy.com`)
-3. acme.sh verifies the TXT record exists
-4. Let's Encrypt validates ownership
-5. The TXT record is automatically cleaned up
-6. The certificate is saved to `~/.acme.sh/in.alybadawy.com_ecc/`
+2. acme.sh adds temporary TXT records to your Vercel DNS for both domains
+3. Let's Encrypt validates ownership of both
+4. The TXT records are automatically cleaned up
+5. The certificate is saved to `~/.acme.sh/in.alybadawy.com_ecc/`
 
 **Expected time:** 30–60 seconds (includes DNS propagation)
 
@@ -103,27 +114,18 @@ Create the script at `/opt/stacks/proxy/npm/certs/deploy-cert.sh`:
 
 ```bash
 #!/bin/bash
-# Certificate deployment hook for acme.sh
-# Called after successful cert issuance or renewal
-# Variables set by acme.sh: $CERT_PATH, $KEY_PATH, $CA_CERT_PATH, $FULLCHAIN_PATH
-
-CERT_DIR="/opt/stacks/proxy/npm/certs"
-
-# Copy certificate files
-cp "$CERT_PATH" "$CERT_DIR/cert.pem"
-cp "$KEY_PATH" "$CERT_DIR/key.pem"
-cp "$CA_CERT_PATH" "$CERT_DIR/chain.pem"
-cp "$FULLCHAIN_PATH" "$CERT_DIR/fullchain.pem"
-
-# Set proper permissions
-chmod 644 "$CERT_DIR"/*.pem
+# Called by acme.sh after cert installation or renewal.
+# By this point acme.sh has already copied the cert files to their destinations —
+# this script just needs to reload NPM so it picks up the new certificate.
 
 # Reload NPM to pick up the new certificate
 docker restart npm 2>/dev/null || true
 
 # Log the deployment
-echo "[$(date)] Certificate deployed successfully" >> /var/log/acme-deploy.log
+echo "[$(date)] Certificate deployed successfully" >> /opt/stacks/proxy/npm/certs/deploy.log
 ```
+
+> **Note:** `$CERT_PATH` and similar variables are not available in `--reloadcmd`. They are only set in acme.sh deploy hooks. The cert files are already installed by acme.sh before this script runs, so no copying is needed here.
 
 Make the script executable:
 
@@ -145,7 +147,7 @@ Install the certificate to its final location and register the deployment hook:
 
 ```bash
 ~/.acme.sh/acme.sh --install-cert \
-  -d "*.in.alybadawy.com" \
+  -d "in.alybadawy.com" \
   --cert-file /opt/stacks/proxy/npm/certs/cert.pem \
   --key-file /opt/stacks/proxy/npm/certs/key.pem \
   --ca-file /opt/stacks/proxy/npm/certs/chain.pem \
@@ -154,6 +156,7 @@ Install the certificate to its final location and register the deployment hook:
 ```
 
 This command:
+
 - Copies the certificate files from the acme.sh cache to `/opt/stacks/proxy/npm/certs/`
 - Registers the deploy hook to run on every renewal
 - Creates symlinks in the acme.sh cache for management
@@ -191,10 +194,11 @@ This runs daily at midnight and checks if any certificates need renewal.
 To test the renewal process before the certificate actually expires:
 
 ```bash
-~/.acme.sh/acme.sh --renew -d "*.in.alybadawy.com" --force
+~/.acme.sh/acme.sh --renew -d "in.alybadawy.com" --force
 ```
 
 The `--force` flag skips the "not yet due for renewal" check. This is useful for:
+
 - Testing the renewal workflow
 - Verifying the deployment hook runs
 - Confirming NPM reloads correctly
@@ -202,36 +206,12 @@ The `--force` flag skips the "not yet due for renewal" check. This is useful for
 Check the log:
 
 ```bash
-tail -f /var/log/acme-deploy.log
+tail -f /opt/stacks/proxy/npm/certs/deploy.log
 ```
 
 ---
 
-## Step 9: Import Certificate into Nginx Proxy Manager
-
-After NPM is running (see guide 04), import the certificate into NPM for use across all proxy hosts.
-
-1. Open the NPM admin panel at `http://172.20.20.5:81`
-2. Navigate to **SSL Certificates**
-3. Click **Add SSL Certificate** → **Custom**
-4. Fill in the form:
-   - **Certificate:** Paste the contents of `/opt/stacks/proxy/npm/certs/fullchain.pem`
-   - **Private Key:** Paste the contents of `/opt/stacks/proxy/npm/certs/key.pem`
-   - **Name:** `wildcard-inside-alybadawy-com`
-5. Click **Save**
-
-To view file contents:
-
-```bash
-cat /opt/stacks/proxy/npm/certs/fullchain.pem
-cat /opt/stacks/proxy/npm/certs/key.pem
-```
-
-Once imported, you can select this certificate for all proxy hosts.
-
----
-
-## Step 10: Verify Certificate Details
+## Step 9: Verify Certificate Details
 
 Check the certificate information:
 
@@ -244,16 +224,20 @@ Shows all managed certificates and their expiry dates.
 Inspect the certificate file:
 
 ```bash
-openssl x509 -in /opt/stacks/proxy/npm/certs/cert.pem -text -noout | grep -E "Subject:|Not Before:|Not After"
+openssl x509 -in /opt/stacks/proxy/npm/certs/cert.pem -text -noout | grep -E "Subject:|DNS:|Not Before:|Not After"
 ```
 
 Expected output:
 
 ```
-Subject: CN = *.in.alybadawy.com
+Subject: CN = in.alybadawy.com
 Not Before: Jan  1 12:00:00 2026 GMT
 Not After : Apr  1 12:00:00 2026 GMT
+                DNS:in.alybadawy.com
+                DNS:*.in.alybadawy.com
 ```
+
+Both SANs must be present — the cert covers the root subdomain and all services under it.
 
 ---
 
@@ -264,9 +248,10 @@ Not After : Apr  1 12:00:00 2026 GMT
 **Problem:** acme.sh cannot create the TXT record in Vercel DNS.
 
 **Solutions:**
+
 1. Verify the Vercel API token is correct and has full access scope:
    ```bash
-   echo $VERCEL_API_TOKEN
+   echo $VERCEL_TOKEN
    ```
 2. Ensure your domain is added to Vercel and DNS is delegated to Vercel nameservers
 3. Check that `in.alybadawy.com` is not already in use as a Vercel project name
@@ -280,6 +265,7 @@ Not After : Apr  1 12:00:00 2026 GMT
 **Problem:** Certificate is renewed but NPM doesn't pick up the new cert.
 
 **Solutions:**
+
 1. Verify the script is executable:
    ```bash
    ls -la /opt/stacks/proxy/npm/certs/deploy-cert.sh
@@ -288,13 +274,13 @@ Not After : Apr  1 12:00:00 2026 GMT
    ```bash
    docker ps | grep npm
    ```
-3. Check acme.sh renewal log:
+3. Check the deploy log:
    ```bash
-   cat ~/.acme.sh/in.alybadawy.com_ecc/in.alybadawy.com.log
+   cat /opt/stacks/proxy/npm/certs/deploy.log
    ```
 4. Manually trigger renewal:
    ```bash
-   ~/.acme.sh/acme.sh --renew -d "*.in.alybadawy.com" --force
+   ~/.acme.sh/acme.sh --renew -d "in.alybadawy.com" --force
    ```
 
 ### Vercel API token expires or is rotated
@@ -306,16 +292,16 @@ If your Vercel token is rotated or expires, update it in the acme.sh config:
 nano ~/.acme.sh/account.conf
 ```
 
-Find the line starting with `VERCEL_API_TOKEN=` and update it with the new token:
+Find the line starting with `VERCEL_TOKEN=` and update it with the new token:
 
 ```
-VERCEL_API_TOKEN=your_new_token_here
+VERCEL_TOKEN=your_new_token_here
 ```
 
 Save the file and test renewal:
 
 ```bash
-~/.acme.sh/acme.sh --renew -d "*.in.alybadawy.com" --force
+~/.acme.sh/acme.sh --renew -d "in.alybadawy.com" --force
 ```
 
 ---
@@ -333,6 +319,7 @@ Save the file and test renewal:
 ## Next Steps
 
 Once the certificate is issued and verified:
+
 - Proceed to guide **05-core-infrastructure.md** to deploy Nginx Proxy Manager
 - NPM will use the wildcard certificate for all internal services
 - Subsequent services will automatically use the same cert for HTTPS

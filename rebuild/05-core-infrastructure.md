@@ -89,14 +89,14 @@ Replace `172.20.20.5` with your server's local IP (e.g., `192.168.1.50`).
 
 ### 1.4: Import the Wildcard Certificate
 
-Now import the wildcard certificate from guide 03.
+Import the certificate issued in Guide 04 into NPM so it can be selected for all proxy hosts.
 
 1. Go to **SSL Certificates** in the left menu
 2. Click **Add SSL Certificate** → **Custom**
 3. Fill in the form:
    - **Certificate:** Paste the full contents of `/opt/stacks/proxy/npm/certs/fullchain.pem`
    - **Private Key:** Paste the full contents of `/opt/stacks/proxy/npm/certs/key.pem`
-   - **Name:** `wildcard-inside-alybadawy-com`
+   - **Name:** `wildcard-in-alybadawy-com`
 4. Click **Save**
 
 To retrieve the certificate contents:
@@ -120,7 +120,7 @@ Create a proxy host for NPM's own admin panel, accessible at `proxy.in.alybadawy
    - **Cache Assets:** On
    - **Block Common Exploits:** On
 4. Click the **SSL** tab:
-   - **SSL Certificate:** Select `wildcard-inside-alybadawy-com`
+   - **SSL Certificate:** Select `wildcard-in-alybadawy-com`
    - **Force SSL:** On
    - **HTTP/2 Support:** On
    - **HSTS Enabled:** On
@@ -265,7 +265,7 @@ Should return JSON with Netdata version and capabilities.
    - **Cache Assets:** Off (Netdata has frequent updates)
    - **Block Common Exploits:** On
 3. Click the **SSL** tab:
-   - **SSL Certificate:** `wildcard-inside-alybadawy-com`
+   - **SSL Certificate:** `wildcard-in-alybadawy-com`
    - **Force SSL:** On
 4. Click **Save**
 
