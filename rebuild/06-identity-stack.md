@@ -19,6 +19,7 @@ Stack name: `lldap`
 LLDAP is a lightweight LDAP server — the user directory for the homelab. All accounts are created here and flow into Authentik.
 
 **Configuration:**
+
 - Base DN: `dc=in,dc=alybadawy,dc=com`
 - Web UI: `lldap.in.alybadawy.com`
 - LDAP port: `3890` (internal only)
@@ -43,22 +44,25 @@ services:
       - LLDAP_HTTP_PORT=17170
       - LLDAP_LDAP_PORT=3890
     networks:
+      - proxy
       - identity
 
 volumes:
   lldap_data:
 
 networks:
+  proxy:
+    external: true
   identity:
     external: true
 ```
 
 In the **Environment variables** section, add:
 
-| Variable | Value |
-|----------|-------|
-| `LLDAP_JWT_SECRET` | *(64-char random secret — run `openssl rand -hex 32`)* |
-| `LLDAP_ADMIN_PASSWORD` | *(strong password — store in password manager)* |
+| Variable               | Value                                                  |
+| ---------------------- | ------------------------------------------------------ |
+| `LLDAP_JWT_SECRET`     | _(64-char random secret — run `openssl rand -hex 32`)_ |
+| `LLDAP_ADMIN_PASSWORD` | _(strong password — store in password manager)_        |
 
 Click **Deploy the stack**. Check **Containers → lldap → Logs**. Expected: `LLDAP successfully started!`
 
@@ -77,14 +81,17 @@ In NPM → **Proxy Hosts → Add Proxy Host**:
 ### Step 3: Initialize LLDAP
 
 Access `https://lldap.in.alybadawy.com` and log in:
+
 - Username: `admin`
-- Password: *(the `LLDAP_ADMIN_PASSWORD` you set)*
+- Password: _(the `LLDAP_ADMIN_PASSWORD` you set)_
 
 **Create user groups** (navigate to Groups):
+
 - `homelab_users` — standard access to services
 - `homelab_admins` — elevated/admin access across services
 
 **Create your personal account** (Groups → Users → Add User):
+
 - Set your username and a strong password
 - Add to both `homelab_users` and `homelab_admins`
 
@@ -99,6 +106,7 @@ Stack name: `authentik`
 Authentik is the central authentication platform — it connects to LLDAP for user data and provides OIDC/OAuth2 login for all services.
 
 **Configuration:**
+
 - Domain: `auth.in.alybadawy.com`
 - PostgreSQL database: `authentik` (created in Guide 05 init script)
 - Redis: shared instance on `identity` network
@@ -161,10 +169,10 @@ networks:
 
 In the **Environment variables** section, add:
 
-| Variable | Value |
-|----------|-------|
-| `AUTHENTIK_SECRET_KEY` | *(64-char random secret — run `openssl rand -hex 32`)* |
-| `AUTHENTIK_DB_PASSWORD` | *(must match the password set in the PostgreSQL init SQL for user `authentik`)* |
+| Variable                | Value                                                                           |
+| ----------------------- | ------------------------------------------------------------------------------- |
+| `AUTHENTIK_SECRET_KEY`  | _(64-char random secret — run `openssl rand -hex 32`)_                          |
+| `AUTHENTIK_DB_PASSWORD` | _(must match the password set in the PostgreSQL init SQL for user `authentik`)_ |
 
 Click **Deploy the stack**. Wait ~1 minute for DB migrations. Check **Containers → authentik-server → Logs**. Watch for: `Starting application server for authentik...`
 
@@ -200,41 +208,48 @@ This makes LLDAP the source of truth for users and groups in Authentik.
 In **Authentik Admin Interface → Directory → Federation & Social Login**:
 
 1. Click **Create → LDAP Source**
-2. Fill in:
+2. Fill in the **Connection** settings:
 
-| Setting | Value |
-|---------|-------|
-| **Name** | `LLDAP` |
-| **Slug** | `lldap` |
-| **Server URI** | `ldap://lldap:3890` |
-| **Bind CN** | `cn=admin,ou=people,dc=in,dc=alybadawy,dc=com` |
-| **Bind Password** | *(your `LLDAP_ADMIN_PASSWORD`)* |
-| **Base DN for User search** | `dc=in,dc=alybadawy,dc=com` |
-| **Base DN for Group search** | `dc=in,dc=alybadawy,dc=com` |
-| **User object filter** | `(|(uid=*)(cn=*))` |
-| **Group object filter** | `(|(objectClass=groupOfNames)(objectClass=groupOfUniqueNames))` |
-| **Group membership field** | `member` |
+| Setting                 | Value                                                                                                               |
+| ----------------------- | ------------------------------------------------------------------------------------------------------------------- |
+| **Name**                | `LLDAP`                                                                                                             |
+| **Slug**                | `lldap`                                                                                                             |
+| **Server URI**          | `ldap://lldap:3890`                                                                                                 |
+| **Connection Security** | `No TLS` (LLDAP does not support STARTTLS — both containers are on the same internal network so plain LDAP is fine) |
+| **Bind CN**             | `uid=admin,ou=people,dc=in,dc=alybadawy,dc=com`                                                                     |
+| **Bind Password**       | _(your `LLDAP_ADMIN_PASSWORD`)_                                                                                     |
+| **Base DN**             | `dc=in,dc=alybadawy,dc=com`                                                                                         |
 
-3. Under **Sync** settings, enable **Sync users** and **Sync groups**
-4. Click **Create**
-5. Open the LDAP source → **Sync** tab → **Run sync now**
+3. Fill in the **LDAP Attribute Mapping** settings:
 
-Verify your LLDAP users and groups appear in Authentik under **Directory → Users** and **Groups**.
+| Setting                     | Value                        |
+| --------------------------- | ---------------------------- |
+| **Addition User DN**        | `ou=people`                  |
+| **Addition Group DN**       | `ou=groups`                  |
+| **User object filter**      | `(objectClass=person)`       |
+| **Group object filter**     | `(objectClass=groupOfNames)` |
+| **Group membership field**  | `member`                     |
+| **Object uniqueness field** | `uid`                        |
 
----
+4. Set **User Property Mappings** (Selected column should contain exactly):
+   - `authentik default LDAP Mapping: DN to User Path`
+   - `authentik default LDAP Mapping: Name`
+   - `authentik default LDAP Mapping: mail`
+   - `authentik default OpenLDAP Mapping: cn`
+   - `authentik default OpenLDAP Mapping: uid`
 
-## Section 4: Create OIDC Providers
+   Remove all Active Directory mappings from the Selected column.
 
-For each service that authenticates through Authentik, create an OIDC provider. You'll do this per-service in Guide 07, but the general flow is:
+5. Set **Group Property Mappings** (Selected column should contain exactly):
+   - `authentik default OpenLDAP Mapping: cn`
 
-In **Authentik Admin → Applications → Providers**:
+6. Click **Update**
+7. Open the LDAP source → click **Run sync again**
 
-1. **Create → OAuth2/OpenID Connect Provider**
-2. **Name:** (e.g., `Nextcloud OIDC`)
-3. **Client Type:** `Confidential`
-4. **Redirect URIs:** (application-specific — see Guide 07)
-5. Click **Create**
-6. Copy the **Client ID** and **Client Secret** — you'll need them in the app configuration
+After sync completes, verify in the Authentik Admin Interface:
+
+- **Directory → Users** — your LLDAP user accounts appear here (alongside `akadmin`), with **Sources** column showing `lldap`
+- **Directory → Groups** — `homelab_users` and `homelab_admins` appear here
 
 ---
 
@@ -266,10 +281,39 @@ docker logs authentik-server | tail -20
 
 Wait up to 2 minutes for DB migrations. Check that the `AUTHENTIK_DB_PASSWORD` matches what was set in the PostgreSQL init SQL.
 
-**LDAP sync not working:**
+**LDAP sync shows "Not synced yet" after running:**
+
+Sync runs in the worker — check worker logs first:
 
 ```bash
-docker logs lldap | grep -i ldap
+docker logs authentik-worker 2>&1 | grep -i "ldap\|sync\|error" | tail -20
 ```
 
-Verify the Bind CN and password in the Authentik LDAP source config exactly match your LLDAP admin credentials.
+Verify the worker can reach LLDAP:
+
+```bash
+docker exec authentik-worker python3 -c "import socket; s=socket.create_connection(('lldap', 3890), timeout=5); print('LDAP port reachable'); s.close()"
+```
+
+**`LDAPUnwillingToPerformResult - Unsupported extended operation: 1.3.6.1.4.1.1466.20037`**
+
+Authentik is trying STARTTLS, which LLDAP doesn't support. In the LDAP source settings, set **Connection Security** to **No TLS**. Both containers are on the same Docker network so plain LDAP is safe.
+
+**Wrong Bind CN** — LLDAP uses `uid=`, not `cn=`:
+
+```
+uid=admin,ou=people,dc=in,dc=alybadawy,dc=com   ✓
+cn=admin,ou=people,dc=in,dc=alybadawy,dc=com    ✗
+```
+
+Update the Bind CN in **Authentik Admin → Directory → Federation & Social Login → LLDAP → Edit**, save, then run sync again.
+
+**`LDAPAttributeError: invalid attribute type objectSid`**
+
+Authentik requests the `objectSid` attribute (Active Directory-specific) from LLDAP, which doesn't support it. The fix is to remove all Active Directory property mappings from both User and Group Property Mappings in the LDAP source. Keep only the LDAP and OpenLDAP mappings listed in Section 3 above. If the error persists even with all AD mappings removed, go to **Customization → Property Mappings**, find any mapping whose expression references `objectSid`, and edit it to guard against the missing attribute:
+
+```python
+if not ldap.get("objectSid"):
+    return None
+return bytes_to_int(list_flatten(ldap.get("objectSid")))
+```
