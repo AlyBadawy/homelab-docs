@@ -237,6 +237,62 @@ All three networks should be present, `/opt/stacks/` should show all subdirector
 
 ---
 
+## Part 8 — Reboot Test
+
+Before moving on, verify that Docker and Portainer survive a reboot automatically. This is critical — all future services depend on this being reliable.
+
+### 8.1 Pre-reboot Checks
+
+Confirm Docker is enabled to start on boot and Portainer has the correct restart policy:
+
+```bash
+# Should return: enabled
+sudo systemctl is-enabled docker
+
+# Should return: unless-stopped
+docker inspect portainer --format '{{.HostConfig.RestartPolicy.Name}}'
+```
+
+### 8.2 Reboot
+
+```bash
+sudo reboot
+```
+
+### 8.3 Post-reboot Verification
+
+After the homelab comes back up (allow ~30–60 seconds), SSH back in and run:
+
+```bash
+# Docker started automatically
+sudo systemctl status docker
+
+# Portainer is running (check Status column — should say "Up X seconds")
+docker ps --format "table {{.Names}}\t{{.Status}}\t{{.Ports}}"
+
+# Networks survived (Docker recreates them on start, but verify)
+docker network ls | grep -E "proxy|identity|apps"
+```
+
+Then open Portainer in your browser to confirm it's fully functional:
+
+```
+http://172.20.20.5:9000
+```
+
+### 8.4 What to Expect
+
+| Check | Expected result |
+|-------|----------------|
+| `systemctl is-enabled docker` | `enabled` |
+| `docker ps` shows portainer | `Up X seconds` (not `Exited`) |
+| All three networks present | `proxy`, `identity`, `apps` |
+| Portainer UI accessible | Login page loads at `http://172.20.20.5:9000` |
+
+> If Portainer shows `Exited` after reboot, the restart policy wasn't applied. Fix with: `docker update --restart unless-stopped portainer && sudo reboot`
+
+---
+
 ## Troubleshooting
 
 **`permission denied` running docker commands**
