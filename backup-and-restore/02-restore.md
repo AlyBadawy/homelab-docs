@@ -1,67 +1,89 @@
-# Homelab Restore Guide
+# Homelab Restore Guide (v3)
 
-## 🎯 Goal
+## ⚙️ Prerequisites
 
-Restore a homelab server such that it is **identical to the original**.
+```bash
+sudo apt update
+sudo apt install -y rsync docker.io
+```
 
-## 🧱 Step 1: Install Base System
+---
 
-Install Ubuntu Server 24.04.
+## 📡 Mount NAS
 
-## 📡 Step 2: Mount NAS
-
-``` bash
+```bash
 sudo mount -t nfs <nas-ip>:/path /mnt/nas
 ```
 
-## 📦 Step 3: Install Required Tools
+---
 
-``` bash
-sudo apt update
-sudo apt install rsync docker.io -y
-```
+## 📁 Select Backup
 
-## 📁 Step 4: Select Backup
-
-``` bash
+```bash
 BACKUP="/mnt/nas/homelab/backups/backup-YYYY-MM-DD"
 ```
 
-## 🛑 Step 5: Stop Docker
+---
 
-``` bash
+## 🛑 Stop Docker
+
+```bash
 sudo systemctl stop docker
 ```
 
-## 🔁 Step 6: Restore
+---
 
-### Restore system
+## 🔁 Restore
 
-``` bash
+### System
+
+```bash
 sudo rsync -aAX --numeric-ids $BACKUP/etc/ /etc/
 ```
 
-### Restore users
+### Users
 
-``` bash
+```bash
 sudo rsync -aAX --numeric-ids $BACKUP/home/ /home/
 sudo rsync -aAX --numeric-ids $BACKUP/root/ /root/
 ```
 
-### Restore Docker
+### Cron
 
-``` bash
-sudo rsync -aAX --numeric-ids $BACKUP/var/lib/docker/ /var/lib/docker/
+```bash
+sudo rsync -aAX --numeric-ids $BACKUP/cron/ /var/spool/cron/
+sudo systemctl restart cron
 ```
 
-## 🔁 Step 7: Reboot
+### Docker
 
-``` bash
+```bash
+sudo rsync -aAX --numeric-ids $BACKUP/docker/ /var/lib/docker/
+```
+
+---
+
+## 🔁 Reboot
+
+```bash
 sudo reboot
 ```
 
-## ✅ Verification
+---
 
--   hostname
--   ssh access (no warnings)
--   docker ps
+## ✅ Verify
+
+- hostname
+- ssh (no fingerprint warning)
+- docker ps
+- crontab -l
+
+---
+
+## 🧠 Notes
+
+If cron fails:
+
+```bash
+sudo systemctl restart cron
+```
