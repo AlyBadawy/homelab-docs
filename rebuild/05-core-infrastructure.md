@@ -1,11 +1,113 @@
 # 05 — Core Infrastructure
 
-This guide deploys NPM (reverse proxy), Netdata (monitoring), and the shared database layer (PostgreSQL and Redis). All services are deployed as Portainer stacks.
+This guide bootstraps Portainer (the first container), then deploys NPM, Kanidm, and the shared database layer. The deployment order matters: Portainer and Kanidm are brought up first because everything else either depends on or is managed through them.
+
+**Deployment order in this guide:**
+
+1. **Portainer** — first container; manages all subsequent stacks
+2. **Kanidm** — second container; identity service needed by NAS and apps (deployed via Guide 06 immediately after Portainer is set up)
+3. **NPM** — reverse proxy; makes all web UIs accessible via subdomain
+4. **PostgreSQL + Redis** — shared database layer for apps
 
 **Prerequisites:**
 
-- Guide 03 complete — Docker installed, networks created, Portainer running at `http://172.20.20.5:9000`
+- Guide 03 complete — Docker installed, networks created (`proxy`, `identity`, `apps`)
 - Guide 04 complete — wildcard cert in `/opt/certs/`
+
+> **About `/opt/stacks/`:** Service config files (compose files, config files) live under `/opt/stacks/<service>/`. Create the root directory once here, then each service's subdirectory is created without `sudo` as you go:
+>
+> ```bash
+> sudo mkdir -p /opt/stacks
+> sudo chown $USER:$USER /opt/stacks
+> ```
+>
+> Run this now before proceeding. After that, all `mkdir -p /opt/stacks/<service>` commands in this and future guides work without `sudo`.
+
+> **About Portainer data:** Portainer stores all of its runtime data — stacks, users, settings, secrets, endpoints — in the Docker named volume `portainer_data` (at `/var/lib/docker/volumes/portainer_data/`). The compose file used to bootstrap it is a one-time script; after first launch, everything is managed through the Portainer UI.
+
+---
+
+## Section 0: Bootstrap Portainer
+
+Portainer is the only service started from the CLI. Everything after this is deployed through the Portainer UI.
+
+### 0.1: Start Portainer
+
+Create the directory and compose file:
+
+```bash
+sudo mkdir -p /opt/stacks/portainer
+sudo chown -r $USER:$USER /opt/stacks
+
+cat > /opt/stacks/portainer/docker-compose.yml << 'EOF'
+services:
+  portainer:
+    image: portainer/portainer-ce:latest
+    container_name: portainer
+    restart: unless-stopped
+    ports:
+      - "9000:9000"
+      - "9443:9443"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - portainer_data:/data
+    networks:
+      - proxy
+
+volumes:
+  portainer_data:
+
+networks:
+  proxy:
+    external: true
+EOF
+
+cd /opt/stacks/portainer
+docker compose up -d
+docker ps | grep portainer
+```
+
+### 0.2: Initial Setup
+
+Open in your browser:
+
+```
+http://172.20.20.5:9000
+```
+
+> Portainer prompts you to create an admin account on first access. If you wait more than a few minutes it locks down for security — restart with `docker restart portainer` to reset the timer.
+
+1. Enter an admin username and a strong password
+2. Click **Create user**
+3. On the next screen, select **Get Started** (local Docker environment)
+
+Portainer will now show the local Docker environment with the networks and containers you've already created.
+
+### 0.3: Reboot Verification
+
+Before proceeding, confirm Portainer survives a reboot:
+
+```bash
+# Confirm restart policy
+docker inspect portainer --format '{{.HostConfig.RestartPolicy.Name}}'
+# → should say: unless-stopped
+
+sudo reboot
+```
+
+After the server comes back up, SSH in and verify:
+
+```bash
+docker ps --format "table {{.Names}}\t{{.Status}}"
+```
+
+Portainer should show `Up X seconds`. Then open `http://172.20.20.5:9000` to confirm the UI is accessible.
+
+---
+
+> **Next: deploy Kanidm before NPM.** Kanidm is the second core service and should be running before NPM so its proxy host can be configured immediately. Proceed to **Guide 06, Section 1** now, then return here for NPM.
+
+---
 
 > **How to deploy a stack in Portainer:** Go to **Stacks → + Add stack**, enter the stack name shown, paste the compose content into the **Web editor**, add any environment variables in the **Environment variables** section below the editor, then click **Deploy the stack**.
 
@@ -127,15 +229,21 @@ netstat -tlnp | grep 81
 
 No output means it's closed.
 
+### Disable port 81 on UFW
+
+```bash
+sudo ufw delete allow 81/tcp
+```
+
 ---
 
 ## Section 2: Portainer Proxy Host
 
-Portainer is already running (deployed in Guide 03). Add an NPM proxy host so it's accessible at `https://dockers.in.alybadawy.com``.
+Add an NPM proxy host so Portainer is accessible at `https://dockers.in.alybadawy.com`.
 
 1. **Proxy Hosts → Add Proxy Host**
 2. **Details** tab:
-   - **Domain Names:** `dockers.in.alybadawy.com``
+   - **Domain Names:** `dockers.in.alybadawy.com`
    - **Scheme:** `http`
    - **Forward Hostname/IP:** `portainer`
    - **Forward Port:** `9000`
@@ -145,122 +253,17 @@ Portainer is already running (deployed in Guide 03). Add an NPM proxy host so it
    - **Force SSL:** On
 4. Click **Save**
 
-Portainer is now accessible at `https://dockers.in.alybadawy.com``.
+Portainer is now accessible at `https://dockers.in.alybadawy.com`.
 
 ---
 
-## Section 3: Netdata
+## Section 3: PostgreSQL and Redis
 
-Stack name: `netdata`
+These are the shared database services used by Nextcloud and other apps. They are container-only — no external ports exposed.
 
-Netdata provides real-time system monitoring — CPU, memory, disk, network, and all Docker containers.
+Apps connect using the default `postgres` superuser — no init scripts or dedicated per-app users are needed. Each app creates its own database on first run if it doesn't exist.
 
-In Portainer, create a new stack named `netdata` with the following compose content:
-
-```yaml
-services:
-  netdata:
-    image: netdata/netdata:latest
-    container_name: netdata
-    pid: host
-    network_mode: host
-    restart: unless-stopped
-    cap_add:
-      - SYS_PTRACE
-      - SYS_ADMIN
-    security_opt:
-      - apparmor:unconfined
-    volumes:
-      - netdataconfig:/etc/netdata
-      - netdatalib:/var/lib/netdata
-      - netdatacache:/var/cache/netdata
-      - /etc/passwd:/host/etc/passwd:ro
-      - /etc/group:/host/etc/group:ro
-      - /etc/localtime:/etc/localtime:ro
-      - /proc:/host/proc:ro
-      - /sys:/host/sys:ro
-      - /etc/os-release:/host/etc/os-release:ro
-      - /var/run/docker.sock:/var/run/docker.sock:ro
-
-volumes:
-  netdataconfig:
-  netdatalib:
-  netdatacache:
-```
-
-No environment variables needed. Click **Deploy the stack**.
-
-Wait 5–10 seconds. Verify in Portainer under **Containers** that `netdata` is running.
-
-**Key configuration notes:**
-
-- `pid: host` — Gives Netdata access to host process info
-- `network_mode: host` — Netdata runs on the host network at port `19999`
-
-### Test Direct Access
-
-```bash
-curl http://localhost:19999/api/v1/info
-```
-
-Should return JSON with Netdata version and capabilities.
-
-### Create NPM Proxy Host for Netdata
-
-⚠️ Because Netdata uses `network_mode: host`, use `127.0.0.1` as the forward address — not the container name.
-
-1. **Proxy Hosts → Add Proxy Host**
-2. **Details** tab:
-   - **Domain Names:** `netdata.in.alybadawy.com`
-   - **Scheme:** `http`
-   - **Forward Hostname/IP:** `127.0.0.1`
-   - **Forward Port:** `19999`
-   - **Cache Assets:** Off
-   - **Block Common Exploits:** On
-3. **SSL** tab:
-   - **SSL Certificate:** `wildcard-in-alybadawy-com`
-   - **Force SSL:** On
-4. Click **Save**
-
-Access at `https://netdata.in.alybadawy.com`.
-
----
-
-## Section 4: PostgreSQL and Redis
-
-These are the shared database services used by Authentik, Nextcloud, and others. They are container-only — no external ports exposed.
-
-### 4.1: Create the PostgreSQL Init Script
-
-This file must exist on disk before deploying the stack — it's mounted into the container on first run to create the databases.
-
-```bash
-mkdir -p /opt/stacks/db/postgres/init
-```
-
-Create `/opt/stacks/db/postgres/init/01-databases.sql`:
-
-```sql
--- Creates databases and users for Authentik and Nextcloud
-
--- Authentik
-CREATE USER authentik WITH PASSWORD 'CHANGE_ME_authentik_pass';
-CREATE DATABASE authentik OWNER authentik;
-ALTER USER authentik CREATEDB;
-
--- Nextcloud
-CREATE USER nextcloud WITH PASSWORD 'CHANGE_ME_nextcloud_pass';
-CREATE DATABASE nextcloud OWNER nextcloud;
-ALTER USER nextcloud CREATEDB;
-```
-
-⚠️ Replace the passwords with strong generated values:
-
-```bash
-openssl rand -base64 32
-```
-
-### 4.2: Deploy PostgreSQL
+### 3.1: Deploy PostgreSQL
 
 Stack name: `postgres`
 
@@ -277,7 +280,6 @@ services:
       POSTGRES_INITDB_ARGS: "-c max_connections=200"
     volumes:
       - postgres_data:/var/lib/postgresql/data
-      - /opt/stacks/db/postgres/init:/docker-entrypoint-initdb.d:ro
     networks:
       - identity
       - apps
@@ -299,13 +301,21 @@ networks:
 
 In the **Environment variables** section, add:
 
-| Variable            | Value                                            |
-| ------------------- | ------------------------------------------------ |
-| `POSTGRES_PASSWORD` | _(strong generated password — root DB password)_ |
+| Variable            | Value                                                                            |
+| ------------------- | -------------------------------------------------------------------------------- |
+| `POSTGRES_PASSWORD` | _(strong generated password — this is the `postgres` superuser password)_        |
+
+Generate a strong password:
+
+```bash
+openssl rand -base64 32
+```
+
+Save this password in your password manager — apps that use PostgreSQL will reference it.
 
 Click **Deploy the stack**. Check **Containers → postgres → Logs** — wait for the healthcheck to show `healthy`.
 
-### 4.3: Deploy Redis
+### 3.2: Deploy Redis
 
 Stack name: `redis`
 
@@ -341,7 +351,7 @@ networks:
 
 No environment variables needed. Click **Deploy the stack**.
 
-### 4.4: Verify Database Connectivity
+### 3.3: Verify Database Connectivity
 
 ```bash
 # PostgreSQL
@@ -357,13 +367,12 @@ Expected: `accepting connections` and `PONG`.
 
 ## Deployment Summary
 
-| Service             | Stack name  | Network        | Access                              |
-| ------------------- | ----------- | -------------- | ----------------------------------- |
-| Nginx Proxy Manager | `npm`       | proxy          | `https://proxy.in.alybadawy.com`    |
-| Portainer           | `portainer` | proxy          | `https://dockers.in.alybadawy.com`` |
-| Netdata             | `netdata`   | host           | `https://netdata.in.alybadawy.com`  |
-| PostgreSQL          | `postgres`  | identity, apps | `postgres:5432` (internal only)     |
-| Redis               | `redis`     | identity, apps | `redis:6379` (internal only)        |
+| Service             | Stack name  | Network        | Access                             |
+| ------------------- | ----------- | -------------- | ---------------------------------- |
+| Portainer           | `portainer` | proxy          | `https://dockers.in.alybadawy.com` |
+| Nginx Proxy Manager | `npm`       | proxy          | `https://proxy.in.alybadawy.com`   |
+| PostgreSQL          | `postgres`  | identity, apps | `postgres:5432` (internal only)    |
+| Redis               | `redis`     | identity, apps | `redis:6379` (internal only)       |
 
 ---
 
@@ -390,16 +399,8 @@ docker logs postgres
 
 Common issues:
 
-- Bad SQL in init script: check `/opt/stacks/db/postgres/init/01-databases.sql`
 - Volume already exists with old data: remove it in Portainer under **Volumes** and redeploy
-
-### Netdata not showing metrics
-
-```bash
-docker exec netdata ls -la /host/proc
-```
-
-If empty, the volume mounts failed. In Portainer, go to **Stacks → netdata** → **Stop** then **Start** to recreate the container.
+- Container exits immediately: check logs for permission errors on the data volume
 
 ### Proxy hosts return 502 Bad Gateway
 

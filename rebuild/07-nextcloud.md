@@ -1,13 +1,12 @@
 # 07 — Nextcloud
 
-Personal cloud storage and file sync, authenticated through Authentik.
+Personal cloud storage and file sync, with users authenticated via Kanidm LDAP.
 
 ## Prerequisites
 
-- Guide 06 complete — LLDAP and Authentik running, LDAP sync working
+- Guide 05 complete — PostgreSQL and Redis running
+- Guide 06 complete — Kanidm running, `nextcloud_reader` service account created
 - Docker networks: `proxy` and `apps` present
-- PostgreSQL running on the `apps` network with `nextcloud` database created
-- Redis running on the `apps` network
 - NAS mounted at `/mnt/nas/homelab/cloudnext`
 
 > **How to deploy a stack in Portainer:** Go to **Stacks → + Add stack**, enter the stack name shown, paste the compose content into the **Web editor**, add environment variables in the **Environment variables** section below the editor, then click **Deploy the stack**.
@@ -45,8 +44,8 @@ services:
       - TZ=America/New_York
       - POSTGRES_HOST=postgres
       - POSTGRES_DB=nextcloud
-      - POSTGRES_USER=nextcloud
-      - POSTGRES_PASSWORD=${NEXTCLOUD_DB_PASSWORD}
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
       - NEXTCLOUD_ADMIN_USER=${NEXTCLOUD_ADMIN_USER}
       - NEXTCLOUD_ADMIN_PASSWORD=${NEXTCLOUD_ADMIN_PASSWORD}
       - NEXTCLOUD_TRUSTED_DOMAINS=cloud.in.alybadawy.com
@@ -71,11 +70,11 @@ networks:
 
 In the **Environment variables** section, add:
 
-| Variable                   | Value                                                                               |
-| -------------------------- | ----------------------------------------------------------------------------------- |
-| `NEXTCLOUD_DB_PASSWORD`    | _(must match the password set in the PostgreSQL init SQL for user `nextcloud`)_     |
-| `NEXTCLOUD_ADMIN_USER`     | `aly`                                                                               |
-| `NEXTCLOUD_ADMIN_PASSWORD` | _(strong temporary password — you'll disable this account after OIDC is working)_  |
+| Variable                   | Value                                                                                 |
+| -------------------------- | ------------------------------------------------------------------------------------- |
+| `POSTGRES_PASSWORD`        | _(the `postgres` superuser password set when deploying the postgres stack in Guide 05)_ |
+| `NEXTCLOUD_ADMIN_USER`     | `aly`                                                                                 |
+| `NEXTCLOUD_ADMIN_PASSWORD` | _(strong temporary password — you'll disable this account after LDAP is working)_    |
 
 Click **Deploy the stack**. Wait 1–2 minutes for initialization. Check **Containers → nextcloud → Logs**. Watch for: `New nextcloud instance initialized`.
 
@@ -141,63 +140,61 @@ You should see `HTTP/2 200` with no `http://` redirects in the chain.
 
 ---
 
-## Section 5: Create Authentik OIDC Provider
+## Section 5: Configure Kanidm LDAP Authentication
 
-In **Authentik Admin → Applications → Providers**:
+Nextcloud uses the **LDAP User and Group Backend** app to authenticate users directly against Kanidm. The `nextcloud_reader` service account created in Guide 06 is used for the LDAP bind.
 
-1. Click **Create → OAuth2/OpenID Connect Provider**
-2. Fill in:
-   - **Name:** `Nextcloud OIDC`
-   - **Client Type:** `Confidential`
-   - **Redirect URIs:** `https://cloud.in.alybadawy.com/apps/user_oidc/code`
-3. Click **Create**
-4. Copy the **Client ID** and **Client Secret** (click the eye icon) — you'll need both in Section 6
+### 5.1: Install the LDAP App
 
-Then create the Authentik Application:
+1. Log in to `https://cloud.in.alybadawy.com` with the admin credentials from Section 2
+2. Click the admin avatar (top right) → **Apps**
+3. Search for `LDAP user and group backend`
+4. Click **Enable**
 
-In **Authentik Admin → Applications → Applications**:
+### 5.2: Configure the LDAP Connection
 
-1. Click **Create**
-2. Fill in:
-   - **Name:** `Nextcloud`
-   - **Slug:** `nextcloud`
-   - **Provider:** `Nextcloud OIDC`
-3. Click **Create**
+Go to **Administration** (avatar → Administration) → **LDAP/AD Integration**.
 
----
+**Server tab:**
 
-## Section 6: Install Nextcloud OIDC App
+| Field    | Value                 |
+| -------- | --------------------- |
+| Host     | `172.20.20.5`         |
+| Port     | `636`                 |
+| User DN  | `dn=token`            |
+| Password | _(the `nextcloud_reader` API token from Guide 06)_ |
+| Base DN  | `dc=in,dc=alybadawy,dc=com` |
 
-1. Open `https://cloud.in.alybadawy.com`
-2. Log in with the admin credentials you set in Section 2
-3. Click the admin avatar (top right) → **Apps**
-4. Search for `openid connect user backend` (app name: `user_oidc`)
-5. Click **Install**
+Check **Use TLS** (StartTLS) or select **Use SSL** depending on the option shown — for port 636 it should be SSL/LDAPS.
 
----
+Click **Test Base DN** — you should see a green confirmation.
 
-## Section 7: Configure OIDC in Nextcloud
+**Users tab:**
 
-1. Go to **Administration** (avatar → Administration)
-2. In the left sidebar, scroll to **OpenID Connect user backend**
-3. Fill in:
-   - **Provider name:** `Authentik`
-   - **Client ID:** _(from Section 5)_
-   - **Client Secret:** _(from Section 5)_
-   - **Discovery URL:** `https://auth.in.alybadawy.com/application/o/nextcloud/.well-known/openid-configuration`
-4. Click **Verify and save**
+- User object classes: `posixaccount`
+- Click **Verify settings and count users** — your Kanidm users should be detected
 
----
+**Groups tab:**
 
-## Section 8: Test OIDC Login
+- Group object classes: `group`
+- Click **Verify settings and count groups** — `homelab_users` and `homelab_admins` should appear
+
+**Advanced tab → Special Attributes:**
+
+| Field         | Value  |
+| ------------- | ------ |
+| Internal Username | `uid` |
+| Email field   | `mail` |
+
+Click **Save** on each tab.
+
+### 5.3: Test LDAP Login
 
 1. Log out from Nextcloud (avatar → Log out)
-2. On the login page, click **Log in with Authentik** (or the OpenID Connect button)
-3. You'll be redirected to Authentik — log in with your LLDAP account
-4. Authorize the app
-5. You'll be logged into Nextcloud as your LLDAP user
+2. Log in with your Kanidm username and password
+3. You should be logged in as the Kanidm user
 
-Once OIDC is confirmed working, disable the initial admin account in **Settings → Users** for security.
+Once LDAP login is confirmed working, disable the initial local admin account in **Administration → Users** for security.
 
 ---
 
@@ -207,10 +204,9 @@ Once OIDC is confirmed working, disable the initial admin account in **Settings 
 - [ ] `https://cloud.in.alybadawy.com` loads, SSL valid
 - [ ] `curl -IL https://cloud.in.alybadawy.com` shows `HTTP/2 200` with no HTTP redirects
 - [ ] Admin login works with initial credentials
-- [ ] OIDC app installed
-- [ ] OIDC login redirects to Authentik and returns successfully
+- [ ] LDAP app installed and connected — users count shows correctly
+- [ ] Kanidm user can log in with their username and password
 - [ ] iOS/macOS Nextcloud client authenticates without looping
-- [ ] LLDAP user can log in via OIDC
 - [ ] Upload a file → confirm it lands at `/mnt/nas/homelab/cloudnext`
 
 ---
@@ -232,21 +228,26 @@ Then redeploy the stack in Portainer.
 
 Ensure Section 3 (NPM `proxy_set_header` lines) and Section 4 (`occ` commands) are both complete. The `overwriteprotocol` setting is the most common missing piece.
 
-**OIDC button not visible on login page:**
+**LDAP app can't connect / "Invalid credentials":**
+
+Verify the `nextcloud_reader` token is correct and Kanidm is reachable from the Nextcloud container:
 
 ```bash
-docker exec -u abc nextcloud php /config/www/nextcloud/occ app:list | grep user_oidc
-# If missing:
-docker exec -u abc nextcloud php /config/www/nextcloud/occ app:install user_oidc
+docker exec nextcloud curl -v --insecure ldaps://172.20.20.5:636
 ```
 
-**"Discovery URL returned an error" in OIDC settings:**
+Check that the token hasn't expired in Kanidm (`kanidm service-account api-token status --name idm_admin nextcloud_reader`).
+
+**"No users found" after LDAP configuration:**
+
+Verify users have POSIX enabled in Kanidm:
 
 ```bash
-docker exec nextcloud curl -v https://auth.in.alybadawy.com/application/o/nextcloud/.well-known/openid-configuration
+docker run --rm -it -e KANIDM_URL=https://id.in.alybadawy.com kanidm/tools:latest \
+  kanidm person posix show --name idm_admin alybadawy
 ```
 
-Nextcloud must be able to reach Authentik — confirm both are on the `proxy` network: `docker network inspect proxy`.
+Non-POSIX accounts are not visible to LDAP clients. Run `kanidm person posix set` if POSIX attributes are missing.
 
 **Large file uploads fail:**
 

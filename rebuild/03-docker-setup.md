@@ -111,11 +111,11 @@ docker network create identity
 docker network create apps
 ```
 
-| Network    | Purpose                                                       |
-| ---------- | ------------------------------------------------------------- |
-| `proxy`    | Reverse proxy and externally-exposed services                 |
-| `identity` | Authentication services (LLDAP, Authentik) and their backends |
-| `apps`     | User-facing applications (Nextcloud, Immich, Home Assistant)  |
+| Network    | Purpose                                                      |
+| ---------- | ------------------------------------------------------------ |
+| `proxy`    | Reverse proxy and externally-exposed services                |
+| `identity` | Authentication services (Kanidm) and their backends          |
+| `apps`     | User-facing applications (Nextcloud, Immich, Home Assistant) |
 
 Verify:
 
@@ -125,171 +125,41 @@ docker network ls
 
 ---
 
-## Part 5 — Create Stack Directory Structure
+## Part 5 — Verify
 
 ```bash
-sudo mkdir -p /opt/stacks/{core/{portainer,netdata},proxy/npm/certs,db/{postgres/init,redis},identity/{lldap,authentik},apps/{nextcloud,immich,homeassistant}}
-sudo chown -R $USER:$USER /opt/stacks
-```
-
-```
-/opt/stacks/
-├── core/
-│   ├── portainer/
-│   └── netdata/
-├── proxy/
-│   └── npm/
-│       └── certs/          ← acme.sh deploys wildcard cert here
-├── db/
-│   ├── postgres/
-│   │   └── init/
-│   └── redis/
-├── identity/
-│   ├── lldap/
-│   └── authentik/
-└── apps/
-    ├── nextcloud/
-    ├── immich/
-    └── homeassistant/
-```
-
----
-
-## Part 6 — Install Portainer
-
-Portainer is the only service bootstrapped from the CLI. Everything else is deployed through its UI after this step.
-
-### 6.1 Create the Compose File
-
-```bash
-cat > /opt/stacks/core/portainer/docker-compose.yml << 'EOF'
-services:
-  portainer:
-    image: portainer/portainer-ce:latest
-    container_name: portainer
-    restart: unless-stopped
-    ports:
-      - "9000:9000"
-      - "9443:9443"
-    volumes:
-      - /var/run/docker.sock:/var/run/docker.sock
-      - portainer_data:/data
-    networks:
-      - proxy
-
-volumes:
-  portainer_data:
-
-networks:
-  proxy:
-    external: true
-EOF
-```
-
-### 6.2 Start Portainer
-
-```bash
-cd /opt/stacks/core/portainer
-docker compose up -d
-```
-
-Verify:
-
-```bash
-docker ps | grep portainer
-```
-
-### 6.3 Initial Setup
-
-Open in your browser:
-
-```
-http://172.20.20.5:9000
-```
-
-> Portainer prompts you to create an admin account on first access. If you wait more than a few minutes, it locks down for security and you'll need to restart the container: `docker restart portainer`
-
-1. Enter an admin username and a strong password
-2. Click **Create user**
-3. On the next screen, select **Get Started** (local Docker environment)
-
-Portainer will now show the local Docker environment with the networks, volumes, and containers you've already created.
-
----
-
-## Part 7 — Verify
-
-```bash
-# Docker daemon
+# Docker daemon running and enabled
 sudo systemctl status docker
-
-# Networks
-docker network ls | grep -E "proxy|identity|apps"
-
-# Directories
-ls /opt/stacks/
-
-# Portainer
-docker ps --format "table {{.Names}}\t{{.Status}}" | grep portainer
-```
-
-All three networks should be present, `/opt/stacks/` should show all subdirectories, and Portainer should show as `Up`.
-
----
-
-## Part 8 — Reboot Test
-
-Before moving on, verify that Docker and Portainer survive a reboot automatically. This is critical — all future services depend on this being reliable.
-
-### 8.1 Pre-reboot Checks
-
-Confirm Docker is enabled to start on boot and Portainer has the correct restart policy:
-
-```bash
-# Should return: enabled
 sudo systemctl is-enabled docker
 
-# Should return: unless-stopped
-docker inspect portainer --format '{{.HostConfig.RestartPolicy.Name}}'
+# All three networks present
+docker network ls | grep -E "proxy|identity|apps"
 ```
 
-### 8.2 Reboot
+Expected: docker is `active (running)` and `enabled`; all three networks listed.
+
+---
+
+## Part 6 — Reboot Test
+
+Verify Docker survives a reboot before adding any services. This is critical — all future services depend on Docker auto-starting reliably.
 
 ```bash
+# Confirm Docker is enabled
+sudo systemctl is-enabled docker   # → enabled
+
+# Reboot
 sudo reboot
 ```
 
-### 8.3 Post-reboot Verification
-
-After the homelab comes back up (allow ~30–60 seconds), SSH back in and run:
+After the homelab comes back up (~30–60 seconds), SSH back in:
 
 ```bash
-# Docker started automatically
 sudo systemctl status docker
-
-# Portainer is running (check Status column — should say "Up X seconds")
-docker ps --format "table {{.Names}}\t{{.Status}}\t{{.Ports}}"
-
-# Networks survived (Docker recreates them on start, but verify)
 docker network ls | grep -E "proxy|identity|apps"
 ```
 
-Then open Portainer in your browser to confirm it's fully functional:
-
-```
-http://172.20.20.5:9000
-```
-
-### 8.4 What to Expect
-
-| Check | Expected result |
-|-------|----------------|
-| `systemctl is-enabled docker` | `enabled` |
-| `docker ps` shows portainer | `Up X seconds` (not `Exited`) |
-| All three networks present | `proxy`, `identity`, `apps` |
-| Portainer UI accessible | Login page loads at `http://172.20.20.5:9000` |
-
-> If Portainer shows `Exited` after reboot, the restart policy wasn't applied. Fix with: `docker update --restart unless-stopped portainer && sudo reboot`
+Expected: Docker is running, all three networks are present.
 
 ---
 
@@ -304,14 +174,6 @@ newgrp docker
 # or log out and back in
 ```
 
-**Portainer locks down before you set the admin password**
-
-```bash
-docker restart portainer
-```
-
-Then immediately open `http://172.20.20.5:9000` and complete setup.
-
 **`docker daemon fails to start` after editing daemon.json**
 
 ```bash
@@ -322,11 +184,3 @@ cat /etc/docker/daemon.json | python3 -m json.tool
 sudo rm /etc/docker/daemon.json
 sudo systemctl restart docker
 ```
-
----
-
-## Next Steps
-
-Portainer is running at `http://172.20.20.5:9000`. All remaining services — NPM, Netdata, PostgreSQL, Redis, LLDAP, Authentik, Nextcloud, Immich, and Home Assistant — are deployed through Portainer's **Stacks** interface.
-
-Proceed to **Guide 04** to issue the wildcard SSL certificate before deploying any web services.

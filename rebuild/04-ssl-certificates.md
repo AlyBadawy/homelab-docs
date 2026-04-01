@@ -115,7 +115,10 @@ First, create the `/opt/certs/` directory — this is the centralized certificat
 ```bash
 sudo mkdir -p /opt/certs
 sudo chmod 755 /opt/certs
+sudo chown $USER:$USER /opt/certs
 ```
+
+The `chown` is required because acme.sh runs as your user (not root) and needs write access to deploy cert files into this directory.
 
 Create the script at `/opt/certs/deploy-cert.sh`:
 
@@ -190,7 +193,7 @@ crontab -l | grep acme
 Expected output:
 
 ```
-0 0 * * * /root/.acme.sh/acme.sh --cron --home /root/.acme.sh > /dev/null 2>&1
+0 0 * * * /home/homelab/.acme.sh/acme.sh --cron --home /home/homelab/.acme.sh > /dev/null 2>&1
 ```
 
 This runs daily at midnight and checks if any certificates need renewal.
@@ -317,10 +320,10 @@ Save the file and test renewal:
 ## Reference: Certificate Lifecycle
 
 1. **Issuance (Step 4):** Certificate is created and valid for 90 days
-2. **Installation (Step 6):** Certificate is copied to NPM's location; cron job is registered
+2. **Installation (Step 6):** Certificate files are deployed to `/opt/certs/`; deploy hook is registered with acme.sh
 3. **Automatic Renewal:** acme.sh cron runs daily; if cert is within 30 days of expiry, it renews automatically
-4. **Deployment:** Upon successful renewal, the deploy hook (Step 5) copies new cert to NPM and restarts the container
-5. **Verification (Step 10):** Check cert expiry and renewal status anytime
+4. **Deployment:** Upon successful renewal, the deploy hook (Step 5) runs `docker ps -q | xargs -r docker restart` — all running containers pick up the new cert from `/opt/certs/` automatically
+5. **Verification (Step 9):** Check cert expiry and renewal status anytime
 
 ---
 
@@ -328,6 +331,6 @@ Save the file and test renewal:
 
 Once the certificate is issued and verified:
 
-- Proceed to guide **05-core-infrastructure.md** to deploy Nginx Proxy Manager
+- Proceed to guide **05-core-infrastructure.md** to bootstrap Portainer and deploy core services
 - NPM and Kanidm both mount `/opt/certs/` directly — no per-service cert copying is needed
 - When the cert renews, the deploy hook restarts all running containers automatically
