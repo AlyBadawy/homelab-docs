@@ -1,9 +1,9 @@
 # ADR-003: Authentication and Identity Management Strategy
 
-**Status:** Accepted
-**Date:** 2026-03-29
+**Status:** Accepted (Revised 2026-04-01)
+**Date:** 2026-03-29 | **Revised:** 2026-03-31, 2026-04-01
 **Deciders:** Homelab Architecture Team
-**Affected Components:** Nextcloud, Immich, Home Assistant, Portainer, NPM, Netdata
+**Affected Components:** Nextcloud, Immich, Home Assistant, Portainer, NPM, Netdata, Ugreen NAS
 
 ---
 
@@ -19,43 +19,45 @@ The homelab deployment consists of multiple services that require user authentic
 
 Currently, each service maintains its own user database and authentication mechanism. This creates several operational challenges:
 
-1. **User Management Burden:** Administrators must create and maintain user accounts across six separate services. Adding new users requires six separate operations.
-2. **Password Fatigue:** Users must remember and manage different credentials for each service, increasing support burden and security risk.
-3. **Inconsistent Access Control:** Different services implement access control differently, with no centralized audit trail or unified identity model.
-4. **Service Scaling:** As the homelab grows to include additional services, the user management problem compounds.
+1. **User Management Burden:** Administrators must create and maintain user accounts across multiple separate services. Adding new users requires per-service operations.
+2. **Password Fatigue:** Users must remember and manage different credentials for each service.
+3. **Inconsistent Access Control:** No centralized audit trail or unified identity model.
+4. **Service Scaling:** As the homelab grows, the user management problem compounds.
 
 ### Hardware Constraints
 
 The homelab infrastructure has a hard constraint of **8GB RAM** across all services. This severely limits choices for identity management:
 
-- **Keycloak:** Requires 512MB+ RAM minimum, makes scaling difficult on an 8GB system
-- **Authentik (standalone):** ~400-700MB when optimized, but lacks native LDAP interface for older services
-- **OpenLDAP:** ~100-200MB, but complex to configure and lacks modern UI for user management
-- **Custom solutions:** Not maintainable for long-term operations
+- **Keycloak:** Requires 512MB+ RAM minimum; JVM overhead makes it impractical on an 8GB system
+- **Authentik:** ~400-700MB for both containers; adds complexity without benefit if OIDC can come from the directory itself
+- **OpenLDAP:** ~100-200MB, but complex to configure, no modern UI, no built-in OAuth2/OIDC
+- **Kanidm:** ~50-100MB; written in Rust; includes POSIX LDAP, web UI, and built-in OAuth2/OIDC provider
 
 ### Service Authentication Capabilities
 
-Services support varying authentication methods:
-
-| Service | OIDC | OAuth2 | LDAP | SAML | Proxy Auth |
-|---------|------|--------|------|------|-----------|
-| Nextcloud | ✓ (via app) | - | ✓ | ✓ | - |
-| Immich | ✓ | - | - | - | - |
-| Home Assistant | - | ✓ | - | - | - |
-| Portainer | - | ✓ | - | - | ✓ |
-| NPM | - | - | - | - | ✓ |
-| Netdata | - | - | - | - | ✓ |
+| Service        | OIDC         | OAuth2 | LDAP         |
+|----------------|--------------|--------|--------------|
+| Nextcloud      | ✓ (via app)  | -      | ✓            |
+| Immich         | ✓ (native)   | -      | -            |
+| Home Assistant | -            | ✓      | -            |
+| Portainer CE   | -            | -      | -            |
+| NPM            | -            | -      | -            |
+| Netdata        | -            | -      | -            |
 
 ---
 
 ## Decision
 
-**Implement a two-tier authentication architecture using LLDAP as the user directory backend and Authentik as the centralized SSO Identity Provider.**
+**Implement a single-tier authentication architecture using Kanidm as both the user directory and the OAuth2/OIDC identity provider.**
 
 This decision establishes:
-1. **LLDAP** as the lightweight directory service (user/group storage)
-2. **Authentik** as the single point of authentication and authorization
-3. **Service integrations** through OIDC, OAuth2, and LDAP outposts as appropriate
+1. **Kanidm** as the sole identity service — user directory (POSIX LDAP) and OAuth2/OIDC provider combined
+2. **Service integrations** via direct LDAPS (Nextcloud, NAS) or Kanidm's built-in OIDC (Immich, Home Assistant)
+3. **NPM and Netdata** use local admin accounts — they have no native OIDC/OAuth2 support
+
+> **Revision note (2026-03-31):** Originally written with LLDAP as the directory backend. LLDAP was replaced by Kanidm after discovering that LLDAP does not expose `posixAccount` with required attributes (`uidNumber`, `gidNumber`, `homeDirectory`) and does not support `posixGroup` at all — making it incompatible with the Ugreen NAS and any other POSIX LDAP client.
+
+> **Revision note (2026-04-01):** Authentik removed from the architecture. Kanidm's built-in OAuth2/OIDC provider covers all app integration needs. Removing Authentik saves ~400-700MB RAM, eliminates two containers, a PostgreSQL database dependency, and a Redis dependency, and removes the LDAP sync complexity between Kanidm and Authentik.
 
 ---
 
@@ -64,149 +66,85 @@ This decision establishes:
 ### Component Diagram
 
 ```
-┌─────────────────────────────────────────────────────────────┐
-│                      Homelab Services                        │
-│  ┌──────────┐ ┌──────────┐ ┌──────────┐ ┌──────────┐       │
-│  │Nextcloud │ │  Immich  │ │  Home    │ │Portainer│       │
-│  │(OIDC)    │ │ (OIDC)   │ │Assistant │ │(OAuth2) │       │
-│  │          │ │          │ │(OAuth2)  │ │         │       │
-│  └────┬─────┘ └────┬─────┘ └────┬─────┘ └────┬────┘       │
-│       │            │            │            │            │
-│  ┌────┴────────────┴────────────┴────────────┴────────┐   │
-│  │                   Authentik (IdP)                   │   │
-│  │  - OIDC Provider                                    │   │
-│  │  - OAuth2 Provider                                  │   │
-│  │  - Forward Auth Proxy (NPM, Netdata)               │   │
-│  │  - Connects to LLDAP for user sync                 │   │
-│  │  - PostgreSQL backend                              │   │
-│  └────┬──────────────────────────────────────────────┘   │
-│       │                                                    │
-│  ┌────┴──────────────────────────────────────────────┐   │
-│  │           LLDAP (User Directory)                   │   │
-│  │  - User accounts and groups                        │   │
-│  │  - LDAP protocol interface                         │   │
-│  │  - Web UI for user management                      │   │
-│  │  - SQLite backend                                  │   │
-│  └─────────────────────────────────────────────────┘   │
-└─────────────────────────────────────────────────────────────┘
+┌─────────────────────────────────────────────────────────────────┐
+│                        Homelab Services                          │
+│                                                                  │
+│  ┌──────────┐  ┌──────────┐  ┌──────────┐  ┌──────────────┐   │
+│  │Nextcloud │  │  Immich  │  │  Home    │  │   Ugreen     │   │
+│  │  (LDAP)  │  │  (OIDC)  │  │Assistant │  │    NAS       │   │
+│  │          │  │          │  │ (OAuth2) │  │  (LDAPS)     │   │
+│  └────┬─────┘  └────┬─────┘  └────┬─────┘  └──────┬───────┘   │
+│       │              │             │                │            │
+│  ┌────┴──────────────┴─────────────┴────────────────┴────────┐  │
+│  │                    Kanidm                                  │  │
+│  │  - POSIX LDAP (LDAPS port 636)                            │  │
+│  │  - OAuth2/OIDC Provider (port 8443)                       │  │
+│  │  - Web UI for user/group management                       │  │
+│  │  - Integrated database (no PostgreSQL/Redis needed)       │  │
+│  └────────────────────────────────────────────────────────────┘  │
+│                                                                  │
+│  NPM: local admin    Netdata: local admin   Portainer: local    │
+└─────────────────────────────────────────────────────────────────┘
 ```
 
 ### Component Responsibilities
 
-#### LLDAP (Lightweight Directory Access Protocol Server)
+#### Kanidm (Identity Management Server)
 
-**Purpose:** Centralized user and group directory
+**Purpose:** Unified user directory and OAuth2/OIDC identity provider
 
 **Characteristics:**
-- Lightweight implementation of LDAP protocol
-- ~20-30MB RAM footprint
-- SQLite-based storage
+- Modern identity server written in Rust; ~50-100MB RAM footprint
+- Integrated database (no external DB dependency)
 - Built-in web UI for user/group management
-- Supports LDAP bind, search, and modify operations
-- Simpler to understand and maintain than OpenLDAP
+- LDAPS-only (no plain LDAP) — correct security posture
+- First-class POSIX support: `posixAccount`, `posixGroup`, auto-assigned `uidNumber`/`gidNumber`
+- Built-in OAuth2/OIDC provider — no middleware layer needed
+- Compatible with NAS, Linux PAM, sssd, and any POSIX LDAP client without schema workarounds
+- Uses the homelab wildcard cert directly for both LDAPS and HTTPS
 
 **Responsibilities:**
-- Store user accounts (username, email, password hash, attributes)
+- Store user accounts (username, email, password hash, POSIX attributes)
 - Manage group memberships
-- Provide LDAP interface for directory queries
-- Serve as single source of truth for identity data
-
-#### Authentik (SSO Identity Provider)
-
-**Purpose:** Centralized authentication and authorization service
-
-**Characteristics:**
-- Modern identity provider with OIDC/OAuth2 support
-- PostgreSQL-backed (shared with other services if needed)
-- Dual-container architecture (server + worker)
-- ~400-700MB RAM when running both containers
-- Stateless and horizontally scalable
-- LDAP outpost capability for backward compatibility
-
-**Responsibilities:**
-- Authenticate users against LLDAP directory
-- Expose OIDC endpoints for services that support it
-- Expose OAuth2 endpoints for services that support it
-- Run LDAP outpost for services requiring LDAP auth
-- Provide forward auth proxy for cookie-based services (NPM, Netdata)
-- Manage sessions and tokens
-- Enforce authorization policies and access control
-- Audit and log all authentication events
+- Expose LDAPS interface for NAS and LDAP-based apps (Nextcloud)
+- Serve as OAuth2/OIDC provider for Immich, Home Assistant, and Portainer BE
+- Single source of truth for all identity data
 
 ### Authentication Flows
 
-#### Flow 1: OIDC-based Services (Nextcloud, Immich)
+#### Flow 1: LDAP-based Services (Nextcloud, NAS)
+
+```
+Nextcloud / NAS
+    │
+    ├─→ [Kanidm LDAPS] Bind request with service account token (Bind DN: dn=token)
+    │
+    ├─→ [Kanidm] Validates token, returns bind success
+    │
+    ├─→ [Service] Queries users/groups (objectClass=posixaccount / objectClass=group)
+    │
+    └─→ [Kanidm] Returns posixAccount users with uidNumber, gidNumber, homeDirectory
+```
+
+#### Flow 2: OIDC-based Services (Immich, Home Assistant)
 
 ```
 User Browser
     │
-    ├─→ [Nextcloud/Immich] Requests Protected Resource
+    ├─→ [Immich/HA] Requests protected resource; no session
     │
-    ├─→ [Service] Redirects to Authentik OIDC Provider
+    ├─→ [Service] Redirects to Kanidm OIDC authorization endpoint
     │       (client_id, redirect_uri, scope, state)
     │
-    ├─→ [Authentik] Shows Login Form (if not authenticated)
+    ├─→ [Kanidm] Shows login form
     │
-    ├─→ [User] Enters Credentials
+    ├─→ [User] Enters Kanidm credentials
     │
-    ├─→ [Authentik] Validates Against LLDAP
-    │       LLDAP checks username/password
+    ├─→ [Kanidm] Validates credentials, issues ID Token + Access Token (signed JWT)
     │
-    ├─→ [Authentik] Issues ID Token + Access Token
-    │       (signed JWT tokens)
+    ├─→ [Service] Validates token, extracts claims (sub, email, name)
     │
-    ├─→ [Service] Validates Token Signature, Extracts Claims
-    │       (user ID, email, groups)
-    │
-    └─→ [Service] Creates Session, Grants Access
-```
-
-#### Flow 2: OAuth2-based Services (Home Assistant, Portainer)
-
-```
-Similar to OIDC, but:
-- Service uses Access Token to call Authentik /userinfo endpoint
-- Authentik returns user attributes from LLDAP
-- Service creates local session based on returned attributes
-```
-
-#### Flow 3: Forward Auth Proxy (NPM, Netdata)
-
-```
-User Browser
-    │
-    ├─→ [Reverse Proxy] Receives Request to /admin (NPM) or /
-    │       (Netdata) with no Authentik session cookie
-    │
-    ├─→ [Reverse Proxy] Checks Authentik /authorize endpoint
-    │
-    ├─→ [Authentik] Returns 401 Unauthorized
-    │
-    ├─→ [Reverse Proxy] Redirects to Authentik Login
-    │
-    ├─→ [User] Authenticates Against LLDAP (via Authentik)
-    │
-    ├─→ [Authentik] Issues Session Cookie
-    │
-    ├─→ [User] Redirected Back to Service
-    │
-    ├─→ [Reverse Proxy] Validates Session Cookie with Authentik
-    │
-    └─→ [Service] Receives X-Remote-User Headers, Grants Access
-```
-
-#### Flow 4: LDAP-based Services (future legacy app support)
-
-```
-Application
-    │
-    ├─→ [Authentik LDAP Outpost] Receives LDAP Bind Request
-    │
-    ├─→ [LDAP Outpost] Forwards to Authentik Backend
-    │
-    ├─→ [Authentik] Validates Against LLDAP User Store
-    │
-    └─→ [LDAP Outpost] Returns LDAP Response (Success/Failure)
+    └─→ [Service] Creates session, grants access
 ```
 
 ---
@@ -215,24 +153,20 @@ Application
 
 ### Nextcloud
 
-**Authentication Method:** OIDC via `user_oidc` app
+**Authentication Method:** LDAP (via LDAP User and Group Backend app)
+
+Using LDAP rather than OIDC preserves stable user UIDs across sessions, which is important for file ownership consistency in Nextcloud.
 
 **Configuration:**
 ```
-Client ID: [from Authentik provider]
-Client Secret: [from Authentik provider]
-Discovery URL: https://authentik.homelab/application/o/nextcloud/.well-known/openid-configuration
-Scope: openid profile email
-User claim: preferred_username
-Email claim: email
-Groups claim: groups
+Server: ldaps://172.20.20.5
+Port: 636
+Bind DN: dn=token
+Bind Password: <nextcloud_reader service account token>
+Base DN: dc=in,dc=alybadawy,dc=com
+User object filter: (objectClass=posixaccount)
+Group object filter: (objectClass=group)
 ```
-
-**Benefits:**
-- Native OIDC support via official app
-- Automatic user provisioning on first login
-- Group-based access control
-- Low overhead on Nextcloud performance
 
 ### Immich
 
@@ -240,186 +174,119 @@ Groups claim: groups
 
 **Configuration:**
 ```
-OIDC_ISSUER_URL: https://authentik.homelab
-OIDC_CLIENT_ID: [from Authentik provider]
-OIDC_CLIENT_SECRET: [from Authentik provider]
-OIDC_SCOPE: openid profile email
-OIDC_STORAGE_LABEL_CLAIM: name
+Issuer URL: https://id.in.alybadawy.com/oauth2/openid/immich
+Client ID: immich
+Client Secret: <from kanidm system oauth2 show-basic-secret>
+Scope: openid profile email
+Auto-register users: enabled
 ```
-
-**Benefits:**
-- Built-in OIDC support
-- No additional app installation required
-- Simple configuration
 
 ### Home Assistant
 
-**Authentication Method:** OAuth2 via generic_oauth2 integration
+**Authentication Method:** OIDC via generic_oauth auth provider
 
-**Configuration:**
+**Configuration (configuration.yaml):**
 ```yaml
 homeassistant:
   auth_providers:
-    - type: generic_oauth2
-      client_id: [from Authentik provider]
-      client_secret: [from Authentik provider]
-      authorize_url: https://authentik.homelab/application/o/authorize/
-      token_url: https://authentik.homelab/application/o/token/
-      userinfo_url: https://authentik.homelab/application/o/userinfo/
-      scope: openid profile email
-      user_attr_name: email
+    - type: homeassistant
+    - type: oidc
+      client_id: homeassistant
+      client_secret: <from kanidm system oauth2 show-basic-secret>
+      discovery_url: https://id.in.alybadawy.com/oauth2/openid/homeassistant/.well-known/openid-configuration
 ```
-
-**Benefits:**
-- Native OAuth2 support in Home Assistant
-- Flexible claims mapping
-- Supports admin/user role assignment via groups
 
 ### Portainer
 
-**Authentication Method:** OAuth2 via Authentik
+**Authentication Method:** Local admin (Community Edition has no OAuth2 support)
 
-**Configuration:**
-```
-OAuth2 Provider: Custom
-Client ID: [from Authentik provider]
-Client Secret: [from Authentik provider]
-Authorization URL: https://authentik.homelab/application/o/authorize/
-Access Token URL: https://authentik.homelab/application/o/token/
-Resource URL (userinfo): https://authentik.homelab/application/o/userinfo/
-Redirect URL: https://portainer.homelab/auth/oauth2/callback
-```
+If upgraded to Portainer BE, Kanidm OAuth2 can be configured using the authorization URL `https://id.in.alybadawy.com/ui/oauth2` and token URL `https://id.in.alybadawy.com/oauth2/token`.
 
-**Benefits:**
-- Centralized Docker access control
-- Team-based access policies via LDAP groups
-- Audit trail of all Docker operations
+### NPM and Netdata
 
-### NPM (Nginx Proxy Manager)
+**Authentication Method:** Local admin accounts only
 
-**Authentication Method:** Authentik Forward Auth Proxy
-
-**Configuration:**
-```
-In NPM Admin Interface:
-- Enable authentication for admin paths
-- Proxy type: Forward Authentication
-- Authentik URL: https://authentik.homelab/outpost.goauthproxy/
-- Client ID: [from Authentik outpost config]
-```
-
-**How it works:**
-- Reverse proxy intercepts requests to /admin and other protected paths
-- Checks with Authentik forward auth endpoint
-- If user not authenticated, redirects to Authentik login
-- After successful login, sets X-authentik-* headers with user info
-- NPM receives authenticated requests with user context
-
-**Benefits:**
-- Protects NPM admin panel without app modification
-- Single session cookie for all proxied services
-- Audit log of who accessed admin functions
-
-### Netdata
-
-**Authentication Method:** Authentik Forward Auth Proxy
-
-**Configuration:**
-```
-Via Docker Compose environment:
-NETDATA_CLAIM_TOKEN: [homelab claim token]
-Protected by reverse proxy with same Authentik forward auth setup as NPM
-```
-
-**Alternative:** If Netdata is accessed directly (not via reverse proxy):
-- Use read-only API token for metrics collection
-- Restrict network access to metrics port (19999)
-- Public dashboards require reverse proxy authentication
-
-**Benefits:**
-- Protects sensitive system metrics
-- Prevents unauthorized system monitoring access
-- Integrates seamlessly with NPM proxy setup
+Neither NPM nor Netdata support OIDC or OAuth2 natively. Both are accessed via local administrator credentials. Access is restricted to the Servers VLAN (172.20.20.0/24) via UFW rules.
 
 ---
 
 ## Why This Architecture: Alternatives Considered
 
-### Alternative 1: Authentik Alone (No LLDAP)
+### Alternative 1: Kanidm + Authentik (Two-Tier)
 
-**Description:** Use Authentik's built-in user database, without separate LLDAP server
+**Description:** Use Authentik as an OIDC/OAuth2 middleware layer sitting in front of Kanidm, syncing users from Kanidm via LDAP.
+
+**Pros:**
+- Authentik has a richer policy engine and flow customization
+- Forward auth proxy for apps without native OIDC (NPM, Netdata)
+- More detailed audit logging UI
+
+**Cons:**
+- Two containers (~400-700MB RAM), a PostgreSQL database, and a Redis instance just for auth middleware
+- LDAP sync introduces a second source of truth — users must be in Kanidm AND synced to Authentik
+- Sync lag means new users aren't immediately available to OIDC apps
+- Authentik as SPOF: if Authentik is down, all OIDC-protected services become inaccessible even if Kanidm is healthy
+- Kanidm already includes a perfectly capable OAuth2/OIDC provider — Authentik adds no unique value for this use case
+
+**Decision:** Rejected. Kanidm's built-in OIDC provider meets all requirements without the operational overhead of a second identity middleware layer.
+
+### Alternative 2: Authentik Alone (No Separate Directory)
+
+**Description:** Use Authentik's built-in user database without a separate directory server.
 
 **Pros:**
 - Single component to manage
-- Simplifies deployment and updates
-- All user management in one interface
 
 **Cons:**
-- Authentik's internal user store lacks advanced LDAP features
-- Some services that only support LDAP authentication would require LDAP outpost anyway
-- No separate LDAP interface means limited interoperability
-- LLDAP is more memory-efficient (~30MB vs. full Authentik overhead)
+- Authentik's internal user store does not expose a POSIX LDAP interface
+- No `posixAccount`/`posixGroup` support — NAS and Linux systems cannot authenticate against it
+- No path to NAS integration without a second LDAP server anyway
 
-**Decision:** Rejected. LLDAP provides a cleaner, more extensible user directory that is lighter weight and offers better separation of concerns.
+**Decision:** Rejected. POSIX LDAP compatibility for the NAS requires a proper directory server.
 
-### Alternative 2: Keycloak
+### Alternative 3: LLDAP as Directory Backend
 
-**Description:** Use Keycloak as the identity provider with built-in LDAP support
+**Description:** Use LLDAP as the directory, with Authentik syncing from it.
 
 **Pros:**
-- Industry-standard identity platform
-- Extensive feature set for enterprise deployments
-- Strong community and documentation
-- Native LDAP backend support
+- Very lightweight (~20-30MB RAM)
+- Simple web UI
 
 **Cons:**
-- **Minimum 512MB RAM required**, often 1-2GB in practice
-- Complex configuration for homelab use cases
-- Overhead of Java Runtime Environment
-- Steeper learning curve
-- Overkill for small number of services
-- On an 8GB system, Keycloak + LLDAP + all services leaves little headroom
+- Declares `posixAccount` objectClass but does not populate required attributes (`uidNumber`, `gidNumber`, `homeDirectory`)
+- Does not support `posixGroup` — groups cannot be found by POSIX LDAP clients
+- Ugreen NAS cannot enumerate users or groups
+- No fix possible without replacing LLDAP
 
-**Decision:** Rejected. Hardware constraints make Keycloak impractical for this homelab scale.
+**Decision:** Rejected. LLDAP was the original choice but was replaced after discovering its POSIX incompatibility during NAS integration (2026-03-31).
 
-### Alternative 3: Authelia
+### Alternative 4: Keycloak
 
-**Description:** Lightweight SSO server focused on simplicity
+**Description:** Use Keycloak as the identity provider.
 
 **Pros:**
-- Minimal memory footprint (~100MB)
-- Easy configuration
-- Good forward auth proxy support
-- Supports LDAP backend
+- Industry-standard platform; extensive feature set
 
 **Cons:**
-- Does not expose OIDC provider endpoints as well as Authentik
-- Limited to forward auth and LDAP for applications
-- Smaller ecosystem and community
-- Fewer integrations available
-- Would require workarounds for OIDC-based services
+- Minimum 512MB RAM, typically 1-2GB in practice due to JVM overhead
+- Overkill for a small homelab
+- On an 8GB system, Keycloak alone would consume 15-25% of available RAM
 
-**Decision:** Rejected. While lightweight, Authelia cannot serve as an OIDC provider, which limits integration with modern services like Immich and Nextcloud's user_oidc app.
+**Decision:** Rejected. Hardware constraints make Keycloak impractical.
 
-### Alternative 4: Individual Per-Service Authentication
+### Alternative 5: Individual Per-Service Authentication
 
-**Description:** Keep current model where each service maintains its own user database
+**Description:** Keep current model where each service maintains its own user database.
 
 **Pros:**
-- No new components to deploy or manage
-- Services are independent
-- No single point of failure for authentication
-- Lower initial complexity
+- No new components; services are independent
 
 **Cons:**
-- No SSO capability — users manage multiple credentials
-- User provisioning/deprovisioning requires manual work per service
-- No consistent audit trail across services
-- Painful to add new users
-- Impossible to enforce consistent password policies
-- No way to bulk deactivate users
+- No SSO; users manage multiple credentials
+- Manual provisioning/deprovisioning per service
+- No consistent audit trail; no unified password policies
 
-**Decision:** Rejected. This approach doesn't meet the goal of unified user management and single sign-on.
+**Decision:** Rejected. Does not meet the goal of unified user management.
 
 ---
 
@@ -427,79 +294,42 @@ Protected by reverse proxy with same Authentik forward auth setup as NPM
 
 ### Positive Consequences
 
-**Pro: Single Unified Identity**
+**Single Unified Identity**
 - Users remember one username and password
-- New users provisioned once in LLDAP, available to all services automatically
-- Offboarding involves a single user deactivation in LLDAP
+- New users provisioned once in Kanidm, available to all services automatically
+- Offboarding involves a single account deactivation
 
-**Pro: Memory-Efficient Design**
-- LLDAP: ~20-30MB RAM (extremely lightweight)
-- Authentik (optimized): ~400-700MB RAM combined (server + worker)
-- Total authentication stack: ~430-730MB, acceptable on 8GB system
-- Leaves ~7GB for application services
+**Memory-Efficient Design**
+- Kanidm: ~50-100MB RAM (including built-in OAuth2/OIDC)
+- No Authentik server (~200-400MB) + worker (~200-300MB) + PostgreSQL (~50MB) + Redis (~20MB)
+- Total authentication stack: ~50-100MB, leaving ~7.9GB for application services
 
-**Pro: Simple User Management**
-- LLDAP web UI makes user management accessible without LDAP expertise
-- Self-service password resets can be enabled in Authentik
-- Group management in LLDAP translates to role-based access in services
+**Operational Simplicity**
+- Single container to manage, monitor, and back up for identity
+- No LDAP sync to configure or debug between two systems
+- Clear ownership: Kanidm is the single source of truth with no derived copies
 
-**Pro: Extensibility**
-- Adding new services only requires Authentik provider configuration
-- No need to touch LLDAP or recreate users
-- LDAP interface allows future services that require LDAP to work without changes
+**No SSO Middleware as Single Point of Failure**
+- Kanidm is the only auth dependency; if it goes down, services using local auth (NPM, Netdata, Portainer) remain accessible
+- Services using Kanidm OIDC (Immich, HA) gracefully degrade — existing sessions typically remain valid
 
-**Pro: Operational Simplicity**
-- Clear separation of concerns: LLDAP stores data, Authentik handles auth flows
-- Well-documented pattern in self-hosting community with proven reliability
-- Standard protocols (LDAP, OIDC, OAuth2) reduce vendor lock-in
-
-**Pro: Audit and Compliance**
-- All authentication events logged in Authentik
-- Centralized view of who accessed what and when
-- Easier to implement password policies, session timeouts, MFA
-- Single place to audit user lifecycle events
+**POSIX-Native**
+- NAS, future Linux PAM integration, and any POSIX LDAP client work without schema workarounds
+- uidNumber and gidNumber are auto-assigned and consistent across all clients
 
 ### Negative Consequences
 
-**Con: Increased Setup Complexity**
-- More components to configure than per-service auth
-- Initial integration with each service requires OIDC/OAuth2 setup
-- LLDAP + Authentik coordination adds learning curve
+**No Forward Auth Proxy for NPM/Netdata**
+- Without Authentik, NPM and Netdata cannot be placed behind SSO
+- Mitigation: restrict access via UFW to Servers VLAN only; use strong local passwords stored in password manager
 
-**Mitigation:** Create runbooks and documentation for each service integration. Invest time upfront in getting configuration right.
+**Kanidm as Single Point of Failure**
+- All LDAP and OIDC authentication depends on Kanidm being available
+- Mitigation: `restart: unless-stopped` policy; regular backups of the `kanidm_data` volume; monitor with Netdata
 
-**Con: Authentik as Critical Dependency**
-- If Authentik is down, users cannot authenticate to any service
-- Even if individual services remain running, they're inaccessible without SSO
-- Single point of failure for the entire homelab
-
-**Mitigation:**
-- Implement robust health monitoring on Authentik containers
-- Set aggressive restart policies (always restart on failure)
-- Back up Authentik PostgreSQL database regularly
-- Document manual recovery procedure if database is corrupted
-- Consider using a separate, dedicated machine for Authentik if possible
-
-**Con: LLDAP Data Loss Risk**
-- If LLDAP SQLite database is corrupted or lost, all users are lost
-- No automatic recovery without backups
-
-**Mitigation:**
-- Include LLDAP data directory in automated backup strategy
-- Regular backup testing (restore to separate container, verify data)
-- Document recovery procedure
-- Consider replicating LLDAP data to secondary storage
-
-**Con: Debugging Complexity**
-- Authentication issues require checking both LLDAP and Authentik logs
-- Service-specific issues harder to diagnose when auth layer is in between
-- Requires deeper understanding of OIDC/OAuth2/LDAP flows
-
-**Mitigation:**
-- Enable debug logging in both components during troubleshooting
-- Create diagnostic playbooks for common issues
-- Document authentication flows clearly
-- Maintain detailed logs with centralized log aggregation (e.g., in Immich or Netdata)
+**Less Rich Policy Engine**
+- Kanidm's auth flows are less customizable than Authentik's
+- Mitigation: Acceptable for a homelab with a small number of trusted users; no enterprise policy requirements
 
 ---
 
@@ -507,75 +337,46 @@ Protected by reverse proxy with same Authentik forward auth setup as NPM
 
 ### Critical Data to Back Up
 
-1. **Authentik PostgreSQL Database**
-   - Contains all authentication policies, providers, applications, sessions
-   - Location: PostgreSQL data directory (typically `/var/lib/postgresql`)
+1. **Kanidm Database**
+   - Contains all user accounts, groups, passwords, POSIX attributes, OAuth2 clients
+   - Location: Docker volume `kanidm_data` (internally `/data/kanidm.db`)
    - Frequency: Daily
    - Retention: 30 days
-   - Method: PostgreSQL `pg_dump` or filesystem backup if database not actively written
+   - Method: `docker exec kanidm kanidmd backup /data/kanidm-backup.db` then copy file out
 
-2. **LLDAP SQLite Database**
-   - Contains all user accounts, groups, passwords
-   - Location: `/lldap/data/lldap.db`
-   - Frequency: Daily
-   - Retention: 30 days
-   - Method: Simple file copy (SQLite is single-file)
-
-3. **Authentik Configuration**
-   - `.env` file with secrets and configuration
-   - Docker Compose file
-   - Any custom Python scripts or outpost configurations
-   - Location: `/opt/authentik/` or wherever deployed
+2. **Kanidm Config**
+   - `/opt/stacks/kanidm/server.toml`
    - Frequency: On every configuration change
-   - Method: Version control or encrypted backup
+   - Method: Included in general `/opt/stacks/` backup
 
-### Recovery Procedures
+### Recovery Procedure
 
-**If Authentik PostgreSQL is lost:**
-1. Stop Authentik containers
-2. Restore PostgreSQL backup
-3. Start PostgreSQL, verify it comes up cleanly
-4. Verify Authentik can connect to database
-5. Restart Authentik server and worker
-6. Test OIDC provider endpoint responds correctly
-
-**If LLDAP database is lost:**
-1. Stop LLDAP container
-2. Restore LLDAP data directory
-3. Start LLDAP container
-4. Verify LDAP bind works: `ldapsearch -x -H ldap://lldap:3890 -D cn=admin,dc=homelab -W -b dc=homelab`
-5. Verify Authentik can still sync users
-6. Test user login in one service
-
-**If both are lost:**
-1. Restore both from backups following procedures above
-2. Verify LDAP connectivity first
-3. Verify Authentik can connect to LDAP
-4. Restart all services with LDAP/Authentik dependencies
-5. Verify authentication works end-to-end
+**If Kanidm database is lost:**
+1. Stop Kanidm container
+2. Restore `kanidm.db` from backup into the named volume
+3. Start Kanidm, verify it comes up cleanly
+4. Verify LDAPS bind works from the host: `openssl s_client -connect 172.20.20.5:636`
+5. Verify OIDC discovery endpoint responds: `curl https://id.in.alybadawy.com/oauth2/openid/immich/.well-known/openid-configuration`
+6. Test user login in one LDAP-connected service and one OIDC-connected service
 
 ---
 
 ## Deployment Checklist
 
-- [ ] Deploy LLDAP container with persistent storage
-- [ ] Create initial admin user in LLDAP
-- [ ] Verify LLDAP is accessible on port 3890 (LDAP) and 17170 (Web UI)
-- [ ] Deploy Authentik server and worker containers with PostgreSQL
-- [ ] Create Authentik superuser account
-- [ ] Verify Authentik is accessible on configured port
-- [ ] Create LDAP source in Authentik pointing to LLDAP
-- [ ] Verify user sync from LLDAP to Authentik works
-- [ ] For each service:
-  - [ ] Create OAuth2/OIDC provider in Authentik
-  - [ ] Generate client credentials
-  - [ ] Configure service to use provider
-  - [ ] Test authentication with non-admin user
-  - [ ] Verify groups/roles sync correctly
-- [ ] Set up automated backups of Authentik DB and LLDAP data
-- [ ] Document recovery procedures
-- [ ] Create monitoring/alerting for Authentik health
-- [ ] Test failover: stop Authentik, verify services remain accessible (read-only)
+- [ ] Deploy Kanidm container with persistent storage and `/opt/certs/` TLS mount
+- [ ] Open UFW ports 636 and 8443 for Servers VLAN
+- [ ] Configure NPM proxy for `id.in.alybadawy.com` with scheme `https`
+- [ ] Recover `admin` and `idm_admin` accounts
+- [ ] Create `homelab_users` and `homelab_admins` groups with POSIX enabled
+- [ ] Create user accounts with POSIX enabled
+- [ ] Create `nas_reader` service account token; configure NAS LDAP
+- [ ] Create `nextcloud_reader` service account token; configure Nextcloud LDAP
+- [ ] Create `immich` OAuth2 resource server; configure Immich OIDC
+- [ ] Create `homeassistant` OAuth2 resource server; configure Home Assistant
+- [ ] Verify LDAPS connectivity from NAS and Nextcloud
+- [ ] Verify OIDC login works from Immich and Home Assistant
+- [ ] Set up automated backup of `kanidm_data` volume
+- [ ] Test backup restore procedure
 
 ---
 
@@ -589,21 +390,22 @@ Protected by reverse proxy with same Authentik forward auth setup as NPM
 
 ## Glossary
 
-- **LDAP (Lightweight Directory Access Protocol):** Industry-standard protocol for accessing centralized directory services. Used for storing and querying user/group information.
-- **LLDAP:** Simplified, lightweight LDAP server implementation optimized for homelab use.
-- **OIDC (OpenID Connect):** Modern identity protocol built on top of OAuth2. Provides authentication (not just authorization) and standard claims about users.
+- **LDAP (Lightweight Directory Access Protocol):** Industry-standard protocol for accessing centralized directory services.
+- **LDAPS:** LDAP over TLS. Kanidm supports LDAPS only — no plain LDAP.
+- **OIDC (OpenID Connect):** Modern identity protocol built on OAuth2. Provides authentication and standard user claims.
 - **OAuth2:** Authorization protocol allowing services to delegate user authentication to a trusted provider.
-- **Authentik:** Open-source identity provider implementing OIDC, OAuth2, SAML, and LDAP protocols.
+- **Kanidm:** Modern identity server implementing LDAPS, OAuth2/OIDC, and POSIX attributes natively. Written in Rust.
+- **posixAccount / posixGroup:** LDAP objectClasses required by POSIX-compliant systems (NAS, Linux PAM, sssd).
 - **SSO (Single Sign-On):** Authentication model where users sign in once and gain access to multiple services.
-- **IdP (Identity Provider):** Service that authenticates users and provides claims/attributes about them to other services.
-- **Forward Auth Proxy:** Authentication pattern where a reverse proxy validates requests with an identity provider before forwarding to backend service.
+- **IdP (Identity Provider):** Service that authenticates users and provides claims to other services.
 - **JWT (JSON Web Token):** Digitally signed token containing user claims, used in OIDC/OAuth2 flows.
 
 ---
 
 ## Document History
 
-| Date | Version | Author | Change |
-|------|---------|--------|--------|
-| 2026-03-29 | 1.0 | Homelab Architecture Team | Initial ADR creation and acceptance |
-
+| Date       | Version | Author                     | Change                                                                                              |
+|------------|---------|----------------------------|-----------------------------------------------------------------------------------------------------|
+| 2026-03-29 | 1.0     | Homelab Architecture Team  | Initial ADR creation and acceptance (LLDAP + Authentik two-tier)                                   |
+| 2026-03-31 | 1.1     | Homelab Architecture Team  | Replace LLDAP with Kanidm — POSIX incompatibility with Ugreen NAS                                  |
+| 2026-04-01 | 2.0     | Homelab Architecture Team  | Remove Authentik — Kanidm built-in OAuth2/OIDC covers all app needs; saves ~500MB RAM              |

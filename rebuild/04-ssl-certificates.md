@@ -7,7 +7,7 @@ This guide covers setting up TLS certificates for `in.alybadawy.com` and `*.in.a
 - Domain: `alybadawy.com` (DNS managed by Vercel)
 - Target certificate: `in.alybadawy.com` and `*.in.alybadawy.com` (SAN cert)
 - acme.sh runs on Ubuntu host (not containerized)
-- Certificates deployed to: `/opt/stacks/proxy/npm/certs/`
+- Certificates deployed to: `/opt/certs/`
 - Certificate manager: Nginx Proxy Manager (NPM)
 
 ---
@@ -108,35 +108,43 @@ You should see: `fullchain.cer`, `ca.cer`, `in.alybadawy.com.cer`, `in.alybadawy
 
 ## Step 5: Create the Certificate Deployment Hook Script
 
-The deployment hook is called by acme.sh whenever the certificate is renewed. It copies the certificate files to NPM's location and restarts NPM.
+The deployment hook is called by acme.sh whenever the certificate is renewed. It restarts all running Docker containers so every service picks up the new certificate automatically — no per-service copying or custom logic required.
 
-Create the script at `/opt/stacks/proxy/npm/certs/deploy-cert.sh`:
+First, create the `/opt/certs/` directory — this is the centralized certificate location for both NPM and Kanidm:
+
+```bash
+sudo mkdir -p /opt/certs
+sudo chmod 755 /opt/certs
+```
+
+Create the script at `/opt/certs/deploy-cert.sh`:
 
 ```bash
 #!/bin/bash
 # Called by acme.sh after cert installation or renewal.
-# By this point acme.sh has already copied the cert files to their destinations —
-# this script just needs to reload NPM so it picks up the new certificate.
+# Restarts all running Docker containers so they pick up the renewed certificate.
+# Using docker ps -q | xargs -r docker restart handles the case where some
+# containers don't exist yet (xargs -r skips the command if input is empty).
 
-# Reload NPM to pick up the new certificate
-docker restart npm 2>/dev/null || true
+# Restart all running containers
+docker ps -q | xargs -r docker restart
 
 # Log the deployment
-echo "[$(date)] Certificate deployed successfully" >> /opt/stacks/proxy/npm/certs/deploy.log
+echo "[$(date)] Certificate deployed successfully" >> /opt/certs/deploy.log
 ```
 
-> **Note:** `$CERT_PATH` and similar variables are not available in `--reloadcmd`. They are only set in acme.sh deploy hooks. The cert files are already installed by acme.sh before this script runs, so no copying is needed here.
+> **Note:** `$CERT_PATH` and similar variables are not available in `--reloadcmd`. They are only set in acme.sh deploy hooks. The cert files are already installed by acme.sh before this script runs, so no copying is needed here. Because all services (NPM, Kanidm, etc.) mount `/opt/certs/` directly, a single restart is all that's needed.
 
 Make the script executable:
 
 ```bash
-chmod +x /opt/stacks/proxy/npm/certs/deploy-cert.sh
+chmod +x /opt/certs/deploy-cert.sh
 ```
 
 Verify the script:
 
 ```bash
-ls -la /opt/stacks/proxy/npm/certs/deploy-cert.sh
+ls -la /opt/certs/deploy-cert.sh
 ```
 
 ---
@@ -148,23 +156,23 @@ Install the certificate to its final location and register the deployment hook:
 ```bash
 ~/.acme.sh/acme.sh --install-cert \
   -d "in.alybadawy.com" \
-  --cert-file /opt/stacks/proxy/npm/certs/cert.pem \
-  --key-file /opt/stacks/proxy/npm/certs/key.pem \
-  --ca-file /opt/stacks/proxy/npm/certs/chain.pem \
-  --fullchain-file /opt/stacks/proxy/npm/certs/fullchain.pem \
-  --reloadcmd "/opt/stacks/proxy/npm/certs/deploy-cert.sh"
+  --cert-file /opt/certs/cert.pem \
+  --key-file /opt/certs/key.pem \
+  --ca-file /opt/certs/chain.pem \
+  --fullchain-file /opt/certs/fullchain.pem \
+  --reloadcmd "/opt/certs/deploy-cert.sh"
 ```
 
 This command:
 
-- Copies the certificate files from the acme.sh cache to `/opt/stacks/proxy/npm/certs/`
+- Copies the certificate files from the acme.sh cache to `/opt/certs/`
 - Registers the deploy hook to run on every renewal
 - Creates symlinks in the acme.sh cache for management
 
 Verify the files were created:
 
 ```bash
-ls -la /opt/stacks/proxy/npm/certs/
+ls -la /opt/certs/
 ```
 
 You should see: `cert.pem`, `key.pem`, `chain.pem`, `fullchain.pem`
@@ -206,7 +214,7 @@ The `--force` flag skips the "not yet due for renewal" check. This is useful for
 Check the log:
 
 ```bash
-tail -f /opt/stacks/proxy/npm/certs/deploy.log
+tail -f /opt/certs/deploy.log
 ```
 
 ---
@@ -224,7 +232,7 @@ Shows all managed certificates and their expiry dates.
 Inspect the certificate file:
 
 ```bash
-openssl x509 -in /opt/stacks/proxy/npm/certs/cert.pem -text -noout | grep -E "Subject:|DNS:|Not Before:|Not After"
+openssl x509 -in /opt/certs/cert.pem -text -noout | grep -E "Subject:|DNS:|Not Before:|Not After"
 ```
 
 Expected output:
@@ -268,7 +276,7 @@ Both SANs must be present — the cert covers the root subdomain and all service
 
 1. Verify the script is executable:
    ```bash
-   ls -la /opt/stacks/proxy/npm/certs/deploy-cert.sh
+   ls -la /opt/certs/deploy-cert.sh
    ```
 2. Check if NPM container is running:
    ```bash
@@ -276,7 +284,7 @@ Both SANs must be present — the cert covers the root subdomain and all service
    ```
 3. Check the deploy log:
    ```bash
-   cat /opt/stacks/proxy/npm/certs/deploy.log
+   cat /opt/certs/deploy.log
    ```
 4. Manually trigger renewal:
    ```bash
@@ -321,5 +329,5 @@ Save the file and test renewal:
 Once the certificate is issued and verified:
 
 - Proceed to guide **05-core-infrastructure.md** to deploy Nginx Proxy Manager
-- NPM will use the wildcard certificate for all internal services
-- Subsequent services will automatically use the same cert for HTTPS
+- NPM and Kanidm both mount `/opt/certs/` directly — no per-service cert copying is needed
+- When the cert renews, the deploy hook restarts all running containers automatically

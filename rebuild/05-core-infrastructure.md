@@ -5,7 +5,7 @@ This guide deploys NPM (reverse proxy), Netdata (monitoring), and the shared dat
 **Prerequisites:**
 
 - Guide 03 complete — Docker installed, networks created, Portainer running at `http://172.20.20.5:9000`
-- Guide 04 complete — wildcard cert in `/opt/stacks/proxy/npm/certs/`
+- Guide 04 complete — wildcard cert in `/opt/certs/`
 
 > **How to deploy a stack in Portainer:** Go to **Stacks → + Add stack**, enter the stack name shown, paste the compose content into the **Web editor**, add any environment variables in the **Environment variables** section below the editor, then click **Deploy the stack**.
 
@@ -32,7 +32,7 @@ services:
     volumes:
       - npm_data:/data
       - npm_letsencrypt:/etc/letsencrypt
-      - /opt/stacks/proxy/npm/certs:/certs:ro
+      - /opt/certs:/certs:ro
     networks:
       - proxy
     environment:
@@ -79,16 +79,16 @@ Import the certificate issued in Guide 04 so it can be selected for all proxy ho
 1. Go to **SSL Certificates** in the left menu
 2. Click **Add SSL Certificate** → **Custom**
 3. Fill in the form:
-   - **Certificate:** Paste the full contents of `/opt/stacks/proxy/npm/certs/fullchain.pem`
-   - **Private Key:** Paste the full contents of `/opt/stacks/proxy/npm/certs/key.pem`
+   - **Certificate:** Paste the full contents of `/opt/certs/fullchain.pem`
+   - **Private Key:** Paste the full contents of `/opt/certs/key.pem`
    - **Name:** `wildcard-in-alybadawy-com`
 4. Click **Save**
 
 To retrieve the cert contents on the homelab:
 
 ```bash
-cat /opt/stacks/proxy/npm/certs/fullchain.pem
-cat /opt/stacks/proxy/npm/certs/key.pem
+cat /opt/certs/fullchain.pem
+cat /opt/certs/key.pem
 ```
 
 ### 1.4: Create First Proxy Host (NPM Admin)

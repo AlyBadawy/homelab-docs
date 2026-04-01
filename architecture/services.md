@@ -29,7 +29,7 @@
 
 | Service             | Image                              | Networks       | Purpose                  | Notes                                                                         |
 | ------------------- | ---------------------------------- | -------------- | ------------------------ | ----------------------------------------------------------------------------- |
-| PostgreSQL (Global) | postgres:16                        | identity, apps | Multi-tenant database    | One instance, multiple databases: authentik, nextcloud, lldap (optional)      |
+| PostgreSQL (Global) | postgres:16                        | identity, apps | Multi-tenant database    | One instance, multiple databases: nextcloud (and others as needed)            |
 | Redis (Global)      | redis:7-alpine                     | identity, apps | Distributed caching      | Shared instance, different DB indexes per service                             |
 | PostgreSQL (Immich) | ghcr.io/immich-app/postgres:latest | apps           | Immich-specific database | Separate instance; pgvecto.rs extension required for vector similarity search |
 
@@ -43,18 +43,15 @@
 
 ## Identity Stack
 
-| Service          | Image                             | Networks        | Purpose                    | Notes                                                          |
-| ---------------- | --------------------------------- | --------------- | -------------------------- | -------------------------------------------------------------- |
-| LLDAP            | lldap/lldap:stable                | identity        | LDAP directory             | LDAP service on port 3890, Web UI on port 17170                |
-| Authentik Server | ghcr.io/goauthentik/server:latest | proxy, identity | OIDC/OAuth2 provider       | Primary authentication backend for apps; sits behind NPM proxy |
-| Authentik Worker | ghcr.io/goauthentik/server:latest | identity        | Background task processing | Needs `/var/run/docker.sock` mount for outpost management      |
+| Service | Image                | Networks        | Exposed Ports          | Purpose                             | Notes                                                                            |
+| ------- | -------------------- | --------------- | ---------------------- | ----------------------------------- | -------------------------------------------------------------------------------- |
+| Kanidm  | kanidm/server:latest | proxy, identity | 8443 (UI), 636 (LDAPS) | User directory + POSIX LDAP + OIDC  | LDAPS-only; wildcard cert mounted from `/opt/certs/`; base DN `dc=in,dc=alybadawy,dc=com` |
 
 **Notes:**
 
-- LLDAP provides LDAP interface for legacy app integration
-- Authentik Server connects to global PostgreSQL and Redis for session/config storage
-- Authentik Worker runs background sync, notification, and outpost tasks
-- Both Authentik containers share same database and Redis configuration
+- Kanidm is the single source of truth for all user and group identities. It exposes `posixAccount` and `posixGroup` over LDAPS — compatible with the NAS and any POSIX LDAP client without schema workarounds.
+- Kanidm requires TLS for all LDAP connections. The shared wildcard cert (`*.in.alybadawy.com`) is mounted directly from `/opt/certs/` — not proxied through NPM for LDAPS. NPM only proxies the web UI on port 8443.
+- Kanidm also serves as the OAuth2/OIDC provider for all web apps (Immich, Home Assistant, Portainer BE). Nextcloud connects via LDAP directly. NPM and Netdata use local admin accounts.
 
 ---
 
@@ -99,12 +96,9 @@
 │   └── redis/
 │       └── docker-compose.yml
 ├── identity/
-│   ├── lldap/
-│   │   ├── docker-compose.yml
-│   │   └── .env                      ← secrets (not in git)
-│   └── authentik/
+│   └── kanidm/
 │       ├── docker-compose.yml
-│       └── .env                      ← secrets (not in git)
+│       └── server.toml               ← Kanidm config (domain, ports, TLS paths)
 └── apps/
     ├── nextcloud/
     │   ├── docker-compose.yml
@@ -129,18 +123,7 @@
 Example `.env` structure:
 
 ```bash
-# identity/lldap/.env
-LLDAP_LDAP_USER_PASS=<strong-random-password>
-LLDAP_JWT_SECRET=<strong-random-token>
-LLDAP_DB_URL=postgres://user:password@postgres:5432/lldap
-
-# identity/authentik/.env
-AUTHENTIK_SECRET_KEY=<strong-random-key>
-AUTHENTIK_BOOTSTRAP_TOKEN=<strong-random-token>
-AUTHENTIK_BOOTSTRAP_PASSWORD=<strong-random-password>
-POSTGRES_PASSWORD=<strong-random-password>
-POSTGRES_USER=authentik
-REDIS_PASSWORD=<strong-random-password>
+# identity/kanidm — no .env needed; secrets are in server.toml and API tokens stored in password manager
 
 # apps/nextcloud/.env
 NEXTCLOUD_ADMIN_USER=admin
@@ -163,7 +146,7 @@ Backup procedure: Export `.env` files to your password manager with full directo
 1. **Core Infrastructure** (core/): Portainer, Netdata
 2. **Database Layer** (db/): PostgreSQL (global), Redis (global), PostgreSQL (Immich)
 3. **Proxy** (proxy/): NPM + acme.sh wildcard cert setup
-4. **Identity** (identity/): LLDAP, Authentik Server, Authentik Worker
+4. **Identity** (identity/): Kanidm (user directory + OAuth2/OIDC provider)
 5. **Applications** (apps/): Nextcloud, Immich, Home Assistant
 
 This order ensures dependencies are available before downstream services attempt to connect.

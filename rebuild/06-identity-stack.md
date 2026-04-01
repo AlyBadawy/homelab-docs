@@ -1,54 +1,75 @@
 # 06 — Identity Stack
 
-Complete guide to deploying LLDAP and Authentik for centralized identity and authentication across the homelab.
+Complete guide to deploying Kanidm as the centralized identity and authentication service for the homelab.
 
 ## Prerequisites
 
-- Guide 05 complete — NPM, PostgreSQL, and Redis running
-- Docker networks: `identity` and `proxy` present
-- PostgreSQL `authentik` database created by the init script
+- Guide 05 complete — NPM running, wildcard cert deployed to `/opt/certs/` (see guide 04)
+- Docker networks `identity` and `proxy` present
 
 > **How to deploy a stack in Portainer:** Go to **Stacks → + Add stack**, enter the stack name shown, paste the compose content into the **Web editor**, add environment variables in the **Environment variables** section below the editor, then click **Deploy the stack**.
 
 ---
 
-## Section 1: LLDAP
+## Section 1: Kanidm
 
-Stack name: `lldap`
+Stack name: `kanidm`
 
-LLDAP is a lightweight LDAP server — the user directory for the homelab. All accounts are created here and flow into Authentik.
+Kanidm is the single identity service for the homelab — it handles both the POSIX user directory (user/group storage, LDAPS for the NAS) and OAuth2/OIDC authentication for all web applications. No separate SSO middleware is needed.
 
 **Configuration:**
 
+- Domain: `in.alybadawy.com`
 - Base DN: `dc=in,dc=alybadawy,dc=com`
-- Web UI: `lldap.in.alybadawy.com`
-- LDAP port: `3890` (internal only)
-- Admin user: `admin` (directory admin, not an app account)
+- Web UI: `https://id.in.alybadawy.com` (port 8443)
+- LDAP: port 636 on host → 3636 in container (LDAPS — TLS only, no plain LDAP)
+- TLS: wildcard cert mounted directly from `/opt/certs/`
 
-### Step 1: Deploy LLDAP
+> **Why LDAPS only?** Kanidm enforces encrypted LDAP for all clients. The wildcard cert from Let's Encrypt covers `*.in.alybadawy.com` so all clients trust it automatically without any cert import.
 
-In Portainer, create a new stack named `lldap` with the following compose content:
+### Step 1: Create Config Directory and Config File
+
+```bash
+sudo mkdir -p /opt/stacks/kanidm
+```
+
+Create `/opt/stacks/kanidm/server.toml`:
+
+```toml
+bindaddress = "0.0.0.0:8443"
+ldapbindaddress = "0.0.0.0:3636"
+domain = "in.alybadawy.com"
+origin = "https://id.in.alybadawy.com"
+db_path = "/data/kanidm.db"
+tls_chain = "/etc/kanidm/tls/fullchain.pem"
+tls_key = "/etc/kanidm/tls/key.pem"
+log_level = "info"
+```
+
+### Step 2: Deploy Kanidm
+
+In Portainer, create a new stack named `kanidm`:
 
 ```yaml
 services:
-  lldap:
-    image: lldap/lldap:stable
-    container_name: lldap
+  kanidm:
+    image: kanidm/server:latest
+    container_name: kanidm
     restart: unless-stopped
+    command: /sbin/kanidmd server -c /etc/kanidm/server.toml
     volumes:
-      - lldap_data:/data
-    environment:
-      - LLDAP_JWT_SECRET=${LLDAP_JWT_SECRET}
-      - LLDAP_LDAP_USER_PASS=${LLDAP_ADMIN_PASSWORD}
-      - LLDAP_LDAP_BASE_DN=dc=in,dc=alybadawy,dc=com
-      - LLDAP_HTTP_PORT=17170
-      - LLDAP_LDAP_PORT=3890
+      - kanidm_data:/data
+      - /opt/stacks/kanidm/server.toml:/etc/kanidm/server.toml:ro
+      - /opt/certs:/etc/kanidm/tls:ro
+    ports:
+      - "8443:8443" # Web UI (HTTPS)
+      - "636:3636" # LDAPS — NAS and any LDAP client
     networks:
       - proxy
       - identity
 
 volumes:
-  lldap_data:
+  kanidm_data:
 
 networks:
   proxy:
@@ -57,263 +78,420 @@ networks:
     external: true
 ```
 
-In the **Environment variables** section, add:
+> **Portainer note:** Relative paths (`./`) are unreliable in Portainer stacks. Absolute paths are used here intentionally. The `command` override is required so Kanidm loads the config from `/etc/kanidm/` rather than `/data/`, avoiding a conflict with the named data volume.
 
-| Variable               | Value                                                  |
-| ---------------------- | ------------------------------------------------------ |
-| `LLDAP_JWT_SECRET`     | _(64-char random secret — run `openssl rand -hex 32`)_ |
-| `LLDAP_ADMIN_PASSWORD` | _(strong password — store in password manager)_        |
+Check logs after starting:
 
-Click **Deploy the stack**. Check **Containers → lldap → Logs**. Expected: `LLDAP successfully started!`
-
-### Step 2: Configure NPM Proxy for LLDAP
-
-In NPM → **Proxy Hosts → Add Proxy Host**:
-
-- **Domain Names:** `lldap.in.alybadawy.com`
-- **Scheme:** `http`
-- **Forward Hostname/IP:** `lldap`
-- **Forward Port:** `17170`
-- **SSL Certificate:** `wildcard-in-alybadawy-com`
-- **Force SSL:** On
-- **HTTP/2 Support:** On
-
-### Step 3: Initialize LLDAP
-
-Access `https://lldap.in.alybadawy.com` and log in:
-
-- Username: `admin`
-- Password: _(the `LLDAP_ADMIN_PASSWORD` you set)_
-
-**Create user groups** (navigate to Groups):
-
-- `homelab_users` — standard access to services
-- `homelab_admins` — elevated/admin access across services
-
-**Create your personal account** (Groups → Users → Add User):
-
-- Set your username and a strong password
-- Add to both `homelab_users` and `homelab_admins`
-
-Your LLDAP directory is ready. Users created here sync into Authentik.
-
----
-
-## Section 2: Authentik
-
-Stack name: `authentik`
-
-Authentik is the central authentication platform — it connects to LLDAP for user data and provides OIDC/OAuth2 login for all services.
-
-**Configuration:**
-
-- Domain: `auth.in.alybadawy.com`
-- PostgreSQL database: `authentik` (created in Guide 05 init script)
-- Redis: shared instance on `identity` network
-
-### Step 1: Deploy Authentik
-
-In Portainer, create a new stack named `authentik` with the following compose content:
-
-```yaml
-services:
-  authentik-server:
-    image: ghcr.io/goauthentik/server:latest
-    container_name: authentik-server
-    command: server
-    restart: unless-stopped
-    environment:
-      AUTHENTIK_REDIS__HOST: redis
-      AUTHENTIK_POSTGRESQL__HOST: postgres
-      AUTHENTIK_POSTGRESQL__USER: authentik
-      AUTHENTIK_POSTGRESQL__NAME: authentik
-      AUTHENTIK_POSTGRESQL__PASSWORD: ${AUTHENTIK_DB_PASSWORD}
-      AUTHENTIK_SECRET_KEY: ${AUTHENTIK_SECRET_KEY}
-      AUTHENTIK_ERROR_REPORTING__ENABLED: "false"
-    volumes:
-      - authentik_media:/media
-      - authentik_templates:/templates
-    networks:
-      - proxy
-      - identity
-
-  authentik-worker:
-    image: ghcr.io/goauthentik/server:latest
-    container_name: authentik-worker
-    command: worker
-    restart: unless-stopped
-    environment:
-      AUTHENTIK_REDIS__HOST: redis
-      AUTHENTIK_POSTGRESQL__HOST: postgres
-      AUTHENTIK_POSTGRESQL__USER: authentik
-      AUTHENTIK_POSTGRESQL__NAME: authentik
-      AUTHENTIK_POSTGRESQL__PASSWORD: ${AUTHENTIK_DB_PASSWORD}
-      AUTHENTIK_SECRET_KEY: ${AUTHENTIK_SECRET_KEY}
-    volumes:
-      - /var/run/docker.sock:/var/run/docker.sock
-      - authentik_media:/media
-      - authentik_templates:/templates
-    networks:
-      - identity
-
-volumes:
-  authentik_media:
-  authentik_templates:
-
-networks:
-  proxy:
-    external: true
-  identity:
-    external: true
+```bash
+docker logs kanidm --tail 30
 ```
 
-In the **Environment variables** section, add:
+Expected in logs: `Kanidm is ready to rock!`
 
-| Variable                | Value                                                                           |
-| ----------------------- | ------------------------------------------------------------------------------- |
-| `AUTHENTIK_SECRET_KEY`  | _(64-char random secret — run `openssl rand -hex 32`)_                          |
-| `AUTHENTIK_DB_PASSWORD` | _(must match the password set in the PostgreSQL init SQL for user `authentik`)_ |
+### Step 3: Open Firewall Ports
 
-Click **Deploy the stack**. Wait ~1 minute for DB migrations. Check **Containers → authentik-server → Logs**. Watch for: `Starting application server for authentik...`
+```bash
+sudo ufw allow from 172.20.20.0/24 to any port 636 proto tcp comment "Kanidm LDAPS - Servers VLAN"
+```
 
-### Step 2: Configure NPM Proxy for Authentik
+### Step 4: Configure NPM Proxy for Kanidm Web UI
 
 In NPM → **Proxy Hosts → Add Proxy Host**:
 
-- **Domain Names:** `auth.in.alybadawy.com`
-- **Scheme:** `http`
-- **Forward Hostname/IP:** `authentik-server`
-- **Forward Port:** `9000`
-- **SSL Certificate:** `wildcard-in-alybadawy-com`
-- **Force SSL:** On
-- **HTTP/2 Support:** On
-- **Websockets Support:** On
+| Field                   | Value                       |
+| ----------------------- | --------------------------- |
+| **Domain Names**        | `id.in.alybadawy.com`       |
+| **Scheme**              | `https`                     |
+| **Forward Hostname/IP** | `kanidm`                    |
+| **Forward Port**        | `8443`                      |
+| **SSL Certificate**     | `wildcard-in-alybadawy-com` |
+| **Force SSL**           | On                          |
+| **HTTP/2 Support**      | On                          |
 
-### Step 3: Complete Authentik Initial Setup
+> Kanidm serves HTTPS natively — set scheme to `https`, not `http`.
 
-Access `https://auth.in.alybadawy.com/if/flow/initial-setup/`
+### Step 5: Bootstrap Admin Accounts
 
-1. Create the `akadmin` account with a very strong password (20+ chars)
-2. **Store this password securely** — it's the Authentik super-admin
-3. After setup, click the avatar icon → **Admin Interface**
+Kanidm has two built-in administrator accounts:
 
-⚠️ The `akadmin` account has complete control over Authentik and all integrated services.
+- `admin` — server admin (manages OAuth2 resources, server config). Recovery-only; not for daily use.
+- `idm_admin` — identity admin (manages users and groups). Use this for all identity management.
+
+Recover both accounts:
+
+```bash
+docker exec -i kanidm kanidmd recover-account admin -c /etc/kanidm/server.toml
+docker exec -i kanidm kanidmd recover-account idm_admin -c /etc/kanidm/server.toml
+```
+
+Each command outputs a one-time temporary password. Log in to `https://id.in.alybadawy.com` for each account and set a permanent password via **Profile → Change Password**.
+
+Store both passwords in your password manager.
+
+### Step 6: Create Groups
+
+Using the Kanidm CLI tools container (run from the homelab host):
+
+```bash
+# Create groups
+docker run --rm -it \
+  -e KANIDM_URL=https://id.in.alybadawy.com \
+  kanidm/tools:latest \
+  kanidm group create --name idm_admin homelab_users
+
+docker run --rm -it \
+  -e KANIDM_URL=https://id.in.alybadawy.com \
+  kanidm/tools:latest \
+  kanidm group create --name idm_admin homelab_admins
+
+# Enable POSIX on each group (required for NAS and all POSIX LDAP clients)
+docker run --rm -it \
+  -e KANIDM_URL=https://id.in.alybadawy.com \
+  kanidm/tools:latest \
+  kanidm group posix set --name idm_admin homelab_users
+
+docker run --rm -it \
+  -e KANIDM_URL=https://id.in.alybadawy.com \
+  kanidm/tools:latest \
+  kanidm group posix set --name idm_admin homelab_admins
+```
+
+Kanidm auto-assigns a `gidNumber` to each POSIX-enabled group. This is what exposes them as `posixGroup` over LDAP.
+
+### Step 7: Create User Accounts
+
+For each user, create the account and enable POSIX. Repeat for every user:
+
+```bash
+# Create person account
+docker run --rm -it \
+  -e KANIDM_URL=https://id.in.alybadawy.com \
+  kanidm/tools:latest \
+  kanidm person create --name idm_admin alybadawy "Aly Badawy"
+
+# Set email
+docker run --rm -it \
+  -e KANIDM_URL=https://id.in.alybadawy.com \
+  kanidm/tools:latest \
+  kanidm person update --name idm_admin alybadawy --mail alybadawy@icloud.com
+
+# Enable POSIX (assigns uidNumber, gidNumber, homeDirectory automatically)
+docker run --rm -it \
+  -e KANIDM_URL=https://id.in.alybadawy.com \
+  kanidm/tools:latest \
+  kanidm person posix set --name idm_admin alybadawy --shell /bin/bash
+
+# Add to groups
+docker run --rm -it \
+  -e KANIDM_URL=https://id.in.alybadawy.com \
+  kanidm/tools:latest \
+  kanidm group add-members --name idm_admin homelab_users alybadawy
+
+docker run --rm -it \
+  -e KANIDM_URL=https://id.in.alybadawy.com \
+  kanidm/tools:latest \
+  kanidm group add-members --name idm_admin homelab_admins alybadawy
+
+# Generate a password reset token so the user can set their own password
+docker run --rm -it \
+  -e KANIDM_URL=https://id.in.alybadawy.com \
+  kanidm/tools:latest \
+  kanidm person credential create-reset-token --name idm_admin alybadawy
+```
+
+The reset token URL lets the user set their own password without the admin knowing it.
+
+### Step 8: Create NAS Service Account
+
+The NAS needs a read-only LDAP bind account. Use a Kanidm service account with an API token — this avoids using personal credentials for machine-to-machine auth.
+
+```bash
+docker run --rm -it \
+  -e KANIDM_URL=https://id.in.alybadawy.com \
+  kanidm/tools:latest \
+  kanidm service-account create --name idm_admin nas_reader "NAS LDAP Reader"
+
+# Save this token — you won't see it again
+docker run --rm -it \
+  -e KANIDM_URL=https://id.in.alybadawy.com \
+  kanidm/tools:latest \
+  kanidm service-account api-token generate --name idm_admin nas_reader "nas-ldap"
+```
+
+Store the token in your password manager. When binding over LDAP, use:
+
+- **Bind DN:** `dn=token`
+- **Password:** _(the token value)_
+
+### Section 1 Verification
+
+- [ ] Kanidm running: `docker ps | grep kanidm`
+- [ ] Web UI accessible: `https://id.in.alybadawy.com`
+- [ ] LDAPS reachable: `openssl s_client -connect 172.20.20.5:636 -servername id.in.alybadawy.com`
+- [ ] Users created with POSIX enabled
+- [ ] Groups created with POSIX enabled
+- [ ] NAS service account token saved in password manager
 
 ---
 
-## Section 3: Connect Authentik to LLDAP
+## Section 2: Connect the Ugreen NAS to Kanidm
 
-This makes LLDAP the source of truth for users and groups in Authentik.
+The NAS authenticates users and resolves groups directly against Kanidm LDAPS. Kanidm exposes proper `posixAccount` and `posixGroup` over LDAP for all POSIX-enabled accounts — no schema workarounds needed.
 
-In **Authentik Admin Interface → Directory → Federation & Social Login**:
+In the Ugreen NAS Control Panel → **Domain/LDAP** → begin setup:
 
-1. Click **Create → LDAP Source**
-2. Fill in the **Connection** settings:
+**Step 1 — Server info:**
 
-| Setting                 | Value                                                                                                               |
-| ----------------------- | ------------------------------------------------------------------------------------------------------------------- |
-| **Name**                | `LLDAP`                                                                                                             |
-| **Slug**                | `lldap`                                                                                                             |
-| **Server URI**          | `ldap://lldap:3890`                                                                                                 |
-| **Connection Security** | `No TLS` (LLDAP does not support STARTTLS — both containers are on the same internal network so plain LDAP is fine) |
-| **Bind CN**             | `uid=admin,ou=people,dc=in,dc=alybadawy,dc=com`                                                                     |
-| **Bind Password**       | _(your `LLDAP_ADMIN_PASSWORD`)_                                                                                     |
-| **Base DN**             | `dc=in,dc=alybadawy,dc=com`                                                                                         |
+| Field          | Value                 |
+| -------------- | --------------------- |
+| Server address | `id.in.alybadawy.com` |
+| DNS server     | `172.20.20.1`         |
 
-3. Fill in the **LDAP Attribute Mapping** settings:
+**Step 2 — Validation & Settings:**
 
-| Setting                     | Value                        |
-| --------------------------- | ---------------------------- |
-| **Addition User DN**        | `ou=people`                  |
-| **Addition Group DN**       | `ou=groups`                  |
-| **User object filter**      | `(objectClass=person)`       |
-| **Group object filter**     | `(objectClass=groupOfNames)` |
-| **Group membership field**  | `member`                     |
-| **Object uniqueness field** | `uid`                        |
+| Field           | Value                          |
+| --------------- | ------------------------------ |
+| Bind DN/Account | `dn=token`                     |
+| Password        | _(the `nas_reader` API token)_ |
+| Encrypt         | SSL                            |
+| BASE DN         | `dc=in,dc=alybadawy,dc=com`    |
 
-4. Set **User Property Mappings** (Selected column should contain exactly):
-   - `authentik default LDAP Mapping: DN to User Path`
-   - `authentik default LDAP Mapping: Name`
-   - `authentik default LDAP Mapping: mail`
-   - `authentik default OpenLDAP Mapping: cn`
-   - `authentik default OpenLDAP Mapping: uid`
+After saving, click the **Domain user** and **Domain user group** tabs — your Kanidm POSIX users and groups should appear.
 
-   Remove all Active Directory mappings from the Selected column.
+---
 
-5. Set **Group Property Mappings** (Selected column should contain exactly):
-   - `authentik default OpenLDAP Mapping: cn`
+## Section 3: Configure Kanidm OAuth2/OIDC for Apps
 
-6. Click **Update**
-7. Open the LDAP source → click **Run sync again**
+Kanidm includes a built-in OAuth2/OIDC provider. Each application gets its own OAuth2 resource server with a unique client ID and secret. Use the `admin` account (not `idm_admin`) to manage OAuth2 resources.
 
-After sync completes, verify in the Authentik Admin Interface:
+The OIDC discovery URL for any Kanidm OAuth2 client follows this pattern:
 
-- **Directory → Users** — your LLDAP user accounts appear here (alongside `akadmin`), with **Sources** column showing `lldap`
-- **Directory → Groups** — `homelab_users` and `homelab_admins` appear here
+```
+https://id.in.alybadawy.com/oauth2/openid/<client-name>/.well-known/openid-configuration
+```
+
+### Nextcloud
+
+Nextcloud connects to Kanidm via LDAP using the **LDAP User and Group Backend** app. This is simpler and more reliable than OIDC for file sync because it preserves stable user UIDs across sessions.
+
+First, create a dedicated service account for Nextcloud's LDAP bind (same pattern as the NAS reader):
+
+```bash
+docker run --rm -it \
+  -e KANIDM_URL=https://id.in.alybadawy.com \
+  kanidm/tools:latest \
+  kanidm service-account create --name idm_admin nextcloud_reader "Nextcloud LDAP Reader"
+
+docker run --rm -it \
+  -e KANIDM_URL=https://id.in.alybadawy.com \
+  kanidm/tools:latest \
+  kanidm service-account api-token generate --name idm_admin nextcloud_reader "nextcloud-ldap"
+```
+
+Enable and configure the **LDAP/AD Integration** app in Nextcloud:
+
+| Field               | Value                            |
+| ------------------- | -------------------------------- |
+| Server              | `ldaps://172.20.20.5`            |
+| Port                | `636`                            |
+| Bind DN             | `dn=token`                       |
+| Bind Password       | _(the `nextcloud_reader` token)_ |
+| Base DN             | `dc=in,dc=alybadawy,dc=com`      |
+| User object filter  | `(objectClass=posixaccount)`     |
+| Group object filter | `(objectClass=group)`            |
+
+Users log in to Nextcloud with their Kanidm credentials (username + password).
+
+### Immich
+
+Immich has native OIDC support. Create the OAuth2 resource server in Kanidm first:
+
+```bash
+# Create Immich OAuth2 client (admin account manages OAuth2 resources)
+docker run --rm -it \
+  -e KANIDM_URL=https://id.in.alybadawy.com \
+  kanidm/tools:latest \
+  kanidm system oauth2 create --name admin \
+    immich "Immich" "https://photos.in.alybadawy.com/auth/login"
+
+# Allow homelab_users to access Immich via OIDC
+docker run --rm -it \
+  -e KANIDM_URL=https://id.in.alybadawy.com \
+  kanidm/tools:latest \
+  kanidm system oauth2 update-scope-map --name admin \
+    immich homelab_users openid profile email
+
+# Get the client secret (save this — you'll need it in Immich settings)
+docker run --rm -it \
+  -e KANIDM_URL=https://id.in.alybadawy.com \
+  kanidm/tools:latest \
+  kanidm system oauth2 show-basic-secret --name admin immich
+```
+
+In Immich → **Administration → Settings → OAuth**:
+
+| Field               | Value                                              |
+| ------------------- | -------------------------------------------------- |
+| Issuer URL          | `https://id.in.alybadawy.com/oauth2/openid/immich` |
+| Client ID           | `immich`                                           |
+| Client Secret       | _(from `show-basic-secret`)_                       |
+| Scope               | `openid profile email`                             |
+| Button text         | `Login with Kanidm`                                |
+| Auto-register users | On                                                 |
+
+### Home Assistant
+
+Home Assistant supports OIDC via the `generic_oauth` auth provider. Create the client in Kanidm:
+
+```bash
+docker run --rm -it \
+  -e KANIDM_URL=https://id.in.alybadawy.com \
+  kanidm/tools:latest \
+  kanidm system oauth2 create --name admin \
+    homeassistant "Home Assistant" "https://ha.in.alybadawy.com/auth/oidc/callback"
+
+docker run --rm -it \
+  -e KANIDM_URL=https://id.in.alybadawy.com \
+  kanidm/tools:latest \
+  kanidm system oauth2 update-scope-map --name admin \
+    homeassistant homelab_users openid profile email
+
+docker run --rm -it \
+  -e KANIDM_URL=https://id.in.alybadawy.com \
+  kanidm/tools:latest \
+  kanidm system oauth2 show-basic-secret --name admin homeassistant
+```
+
+In Home Assistant `configuration.yaml`:
+
+```yaml
+homeassistant:
+  auth_providers:
+    - type: homeassistant
+    - type: oidc
+      client_id: homeassistant
+      client_secret: <secret from show-basic-secret>
+      discovery_url: https://id.in.alybadawy.com/oauth2/openid/homeassistant/.well-known/openid-configuration
+```
+
+### Portainer
+
+Portainer CE uses local admin accounts — OAuth2 is a Business Edition feature. For CE, create a local admin account in Portainer and skip OAuth2 configuration. NPM and Netdata are accessed with their own local admin credentials and do not require Kanidm integration.
+
+If you upgrade to Portainer BE, create the client:
+
+```bash
+docker run --rm -it \
+  -e KANIDM_URL=https://id.in.alybadawy.com \
+  kanidm/tools:latest \
+  kanidm system oauth2 create --name admin \
+    portainer "Portainer" "https://dockers.in.alybadawy.com"
+
+docker run --rm -it \
+  -e KANIDM_URL=https://id.in.alybadawy.com \
+  kanidm/tools:latest \
+  kanidm system oauth2 update-scope-map --name admin \
+    portainer homelab_admins openid profile email
+
+docker run --rm -it \
+  -e KANIDM_URL=https://id.in.alybadawy.com \
+  kanidm/tools:latest \
+  kanidm system oauth2 show-basic-secret --name admin portainer
+```
+
+In Portainer → **Settings → Authentication → OAuth**:
+
+| Field             | Value                                                          |
+| ----------------- | -------------------------------------------------------------- |
+| Client ID         | `portainer`                                                    |
+| Client Secret     | _(from `show-basic-secret`)_                                   |
+| Authorization URL | `https://id.in.alybadawy.com/ui/oauth2`                        |
+| Access Token URL  | `https://id.in.alybadawy.com/oauth2/token`                     |
+| Resource URL      | `https://id.in.alybadawy.com/oauth2/openid/portainer/userinfo` |
+| Redirect URL      | `https://dockers.in.alybadawy.com`                             |
+| User identifier   | `preferred_username`                                           |
 
 ---
 
 ## Verification Checklist
 
-- [ ] LLDAP running: check Portainer Containers list
-- [ ] LLDAP web UI: `https://lldap.in.alybadawy.com` loads and login works
-- [ ] Your user account + groups created in LLDAP
-- [ ] Authentik running: check Portainer Containers list
-- [ ] Authentik accessible: `https://auth.in.alybadawy.com` loads
-- [ ] LDAP sync complete: users visible in Authentik **Directory → Users**
+- [ ] Kanidm running: `docker ps | grep kanidm`
+- [ ] Kanidm web UI loads: `https://id.in.alybadawy.com`
+- [ ] LDAPS reachable from host: `openssl s_client -connect 172.20.20.5:636 -servername id.in.alybadawy.com`
+- [ ] Users and groups created with POSIX enabled
+- [ ] NAS Domain user tab shows Kanidm users
+- [ ] NAS Domain user group tab shows Kanidm groups
+- [ ] Nextcloud LDAP integration configured and users visible
+- [ ] Immich OIDC login works end-to-end
+- [ ] Home Assistant OAuth2 configured
 
 ---
 
 ## Troubleshooting
 
-**LLDAP won't start:**
+**Kanidm won't start — TLS error:**
 
 ```bash
-docker logs lldap
-docker network ls | grep identity
+ls -la /opt/certs/
+docker logs kanidm | grep -i "tls\|cert\|error"
 ```
 
-**Authentik stuck on startup:**
+Verify the cert files exist and are readable:
 
 ```bash
-docker logs authentik-server | tail -20
+openssl x509 -in /opt/certs/fullchain.pem -text -noout | grep -E "Subject:|Not After"
 ```
 
-Wait up to 2 minutes for DB migrations. Check that the `AUTHENTIK_DB_PASSWORD` matches what was set in the PostgreSQL init SQL.
+**NAS shows no users after connecting:**
 
-**LDAP sync shows "Not synced yet" after running:**
-
-Sync runs in the worker — check worker logs first:
+Users must have POSIX enabled in Kanidm — non-POSIX accounts are not exposed over LDAP to POSIX clients. Check:
 
 ```bash
-docker logs authentik-worker 2>&1 | grep -i "ldap\|sync\|error" | tail -20
+docker run --rm -it \
+  -e KANIDM_URL=https://id.in.alybadawy.com \
+  kanidm/tools:latest \
+  kanidm person posix show --name idm_admin <username>
 ```
 
-Verify the worker can reach LLDAP:
+If no POSIX attributes are shown, run `kanidm person posix set` for that user (Section 1, Step 7).
+
+**LDAPS connection refused from NAS or Nextcloud:**
 
 ```bash
-docker exec authentik-worker python3 -c "import socket; s=socket.create_connection(('lldap', 3890), timeout=5); print('LDAP port reachable'); s.close()"
+# From homelab host:
+openssl s_client -connect 172.20.20.5:636 -servername id.in.alybadawy.com
+
+# Check UFW:
+sudo ufw status | grep 636
 ```
 
-**`LDAPUnwillingToPerformResult - Unsupported extended operation: 1.3.6.1.4.1.1466.20037`**
+**Kanidm CLI — "Is a directory" error for `/root/.config/kanidm`:**
 
-Authentik is trying STARTTLS, which LLDAP doesn't support. In the LDAP source settings, set **Connection Security** to **No TLS**. Both containers are on the same Docker network so plain LDAP is safe.
+This happens when Docker creates the config path as a directory instead of a file. Fix inside the running tools container:
 
-**Wrong Bind CN** — LLDAP uses `uid=`, not `cn=`:
+```bash
+docker run --rm -it \
+  -e KANIDM_URL=https://id.in.alybadawy.com \
+  kanidm/tools:latest \
+  sh
 
+# Inside the container:
+rm -rf /root/.config/kanidm
+mkdir -p /root/.config
+printf 'uri = "https://id.in.alybadawy.com"\nverify_ca = true\n' > /root/.config/kanidm
+kanidm login --name idm_admin
 ```
-uid=admin,ou=people,dc=in,dc=alybadawy,dc=com   ✓
-cn=admin,ou=people,dc=in,dc=alybadawy,dc=com    ✗
+
+**Cert not updated after renewal:**
+
+The deploy hook at `/opt/certs/deploy-cert.sh` restarts all running containers automatically. Verify it ran:
+
+```bash
+cat /opt/certs/deploy.log
 ```
 
-Update the Bind CN in **Authentik Admin → Directory → Federation & Social Login → LLDAP → Edit**, save, then run sync again.
+Force a manual renewal test:
 
-**`LDAPAttributeError: invalid attribute type objectSid`**
-
-Authentik requests the `objectSid` attribute (Active Directory-specific) from LLDAP, which doesn't support it. The fix is to remove all Active Directory property mappings from both User and Group Property Mappings in the LDAP source. Keep only the LDAP and OpenLDAP mappings listed in Section 3 above. If the error persists even with all AD mappings removed, go to **Customization → Property Mappings**, find any mapping whose expression references `objectSid`, and edit it to guard against the missing attribute:
-
-```python
-if not ldap.get("objectSid"):
-    return None
-return bytes_to_int(list_flatten(ldap.get("objectSid")))
+```bash
+~/.acme.sh/acme.sh --renew -d "in.alybadawy.com" --force
 ```
