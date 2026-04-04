@@ -95,7 +95,7 @@ sudo sync
 
 ### Profile Setup
 
-- **Hostname:** Enter `lab` (the full DNS name will be `lab.in.alybadawy.com` — configured properly in a post-install step)
+- **Hostname:** Enter `dc` (the full FQDN `dc.id.in.alybadawy.com` is set in Section 7 below — Samba AD requires this exact format)
 - **Username:** Enter `alybadawy`
 - **Password:** Create a strong password (mix of uppercase, lowercase, numbers, special chars)
 - Confirm the password
@@ -175,25 +175,19 @@ ip route show
 
 ## 7. Set Hostname and Hosts File
 
-The installer sets the short hostname (`lab`), but the full qualified name and `/etc/hosts` need to be configured manually.
+> **Why this matters for Samba AD:** Samba 4 Active Directory requires the machine's OS hostname to exactly match the DC's FQDN (`dc.id.in.alybadawy.com`). This must be done before Samba is installed. Setting it here during OS setup avoids having to reconfigure anything later.
 
-### Verify and set the hostname
-
-```bash
-hostnamectl
-```
-
-The output should show `Static hostname: lab`. If it doesn't match, set it:
+### Set the full FQDN as the system hostname
 
 ```bash
-sudo hostnamectl set-hostname lab
+sudo hostnamectl set-hostname dc.id.in.alybadawy.com
 ```
 
 Verify:
 
 ```bash
-hostname          # → lab
-hostname -f       # → lab (FQDN resolves once hosts file is updated below)
+hostname          # → dc.id.in.alybadawy.com
+hostname -f       # → dc.id.in.alybadawy.com
 ```
 
 ### Update /etc/hosts
@@ -208,15 +202,17 @@ It will look something like this by default:
 
 ```
 127.0.0.1   localhost
-127.0.1.1   lab
+127.0.1.1   dc
 ```
 
-Replace `127.0.1.1   lab` with the real LAN IP and full hostname:
+Remove the `127.0.1.1` line entirely. The file should contain only:
 
 ```
 127.0.0.1       localhost
-172.20.20.5     lab.in.alybadawy.com  lab
+172.20.20.5     dc.id.in.alybadawy.com  dc
 ```
+
+> **Important:** Samba AD provisioning (`samba-tool domain provision`) reads `/etc/hosts` and will fail or misbehave if the loopback line `127.0.1.1` is present. Remove it.
 
 Save and close (`Ctrl+O`, `Enter`, `Ctrl+X`).
 
@@ -224,17 +220,19 @@ Verify the FQDN resolves correctly:
 
 ```bash
 hostname -f
-# → lab.in.alybadawy.com
+# Expected: dc.id.in.alybadawy.com
 ```
 
-### Register DNS record on UDR7
+### Register DNS records on UDR7
 
-For other devices on the network to resolve `lab.in.alybadawy.com`, add an A record in the UDR7's internal DNS:
+For other devices on the network to resolve the homelab by name, add records in the UDR7's internal DNS under **Settings → Networks → [DNS / Local DNS Records]**:
 
-- In UniFi Network go to **Settings → Networks → [DNS / Local DNS Records]**
-- Add: `lab.in.alybadawy.com` → `172.20.20.5`
+| Record type | Name                       | Value           | Purpose                                          |
+| ----------- | -------------------------- | --------------- | ------------------------------------------------ |
+| A           | `lab.in.alybadawy.com`     | `172.20.20.5`   | Friendly alias for the homelab server            |
+| A           | `dc.id.in.alybadawy.com`   | `172.20.20.5`   | DC hostname (used before Samba DNS is live)      |
 
-This is separate from the `*.in.alybadawy.com` wildcard record (which points to the homelab for service subdomains) — `lab.in.alybadawy.com` is the server's own identity record.
+> **Note:** After Samba AD is provisioned (next guide), a DNS forward zone for `id.in.alybadawy.com` is added to UDR7 so that Samba's own DNS answers AD queries. The `dc.id.in.alybadawy.com` A record above is only needed during the initial Samba setup before that forward zone exists.
 
 ---
 
@@ -314,7 +312,7 @@ lsblk -f
 
 ## 10. Enable UFW Firewall
 
-Configure the Uncomplicated Firewall to block unauthorized access:
+Configure the Uncomplicated Firewall to block unauthorized access. All Samba AD ports are included here since UFW is set up once at the OS level before any services are installed.
 
 ```bash
 # Set default policies: deny all incoming, allow all outgoing
@@ -334,6 +332,27 @@ sudo ufw allow 81/tcp comment 'NPM Admin'
 # Allow Netdata monitoring
 sudo ufw allow 19999/tcp comment 'Netdata'
 
+# --- Samba 4 Active Directory ports ---
+# DNS (Samba internal DNS server for the AD zone)
+sudo ufw allow 53 comment 'Samba AD DNS'
+
+# Kerberos (ticket issuance and password change)
+sudo ufw allow 88 comment 'Samba AD Kerberos'
+sudo ufw allow 464 comment 'Samba AD Kerberos pw'
+
+# LDAP and LDAPS (directory lookups from services and NAS)
+sudo ufw allow 389/tcp comment 'Samba AD LDAP'
+sudo ufw allow 636/tcp comment 'Samba AD LDAPS'
+
+# SMB/NetBIOS (DC management, samba-tool, Windows admin)
+sudo ufw allow 139/tcp comment 'Samba AD NetBIOS'
+sudo ufw allow 445/tcp comment 'Samba AD SMB'
+
+# RPC endpoint mapper + dynamic RPC range
+sudo ufw allow 135/tcp comment 'Samba AD RPC'
+sudo ufw allow 49152:65535/tcp comment 'Samba AD RPC dynamic'
+# --- end Samba AD ports ---
+
 # Enable the firewall (this will prompt for confirmation)
 sudo ufw enable
 ```
@@ -341,7 +360,7 @@ sudo ufw enable
 Verify firewall rules:
 
 ```bash
-sudo ufw status
+sudo ufw status verbose
 ```
 
 You should see all rules listed with `ALLOW` status.
@@ -375,7 +394,7 @@ Create the mount point directories so they exist before fstab is configured:
 sudo mkdir -p /mnt/nas/homelab
 ```
 
-> **Full NAS mount configuration is covered in [Guide 02 — NAS Mounts](02-nas-mounts.md).** That guide covers NAS-side NFS export setup, resilient fstab options (automount, nofail, soft mounts), Docker service dependency ordering, ownership setup, and resilience testing. Complete guide 02 before starting guide 03 (Docker).
+> **Full NAS mount configuration is covered in [Guide 03 — NAS Mounting](03-nas-mounting.md).** That guide covers NAS-side NFS export setup, resilient fstab options (automount, nofail, soft mounts), Docker service dependency ordering, ownership setup, and resilience testing. Complete guide 03 before starting guide 04 (Docker).
 
 ---
 
@@ -392,8 +411,11 @@ ip route show
 
 # Verify hostname and FQDN
 hostname && hostname -f
-# → lab
-# → lab.in.alybadawy.com
+# → dc.id.in.alybadawy.com
+# → dc.id.in.alybadawy.com
+
+# Verify /etc/hosts has no 127.0.1.1 line and correct entry
+cat /etc/hosts
 
 # Check disk partitions and free space
 df -h
@@ -406,25 +428,28 @@ swapon --show
 # Verify SSH is running
 systemctl status ssh
 
-# Verify firewall is active
-sudo ufw status
+# Verify firewall is active with all rules
+sudo ufw status verbose
 ```
 
 Expected output:
 
 - `ip addr` shows `172.20.20.5/24` on the Ethernet interface
-- `hostname -f` returns `lab.in.alybadawy.com`
+- `hostname -f` returns `dc.id.in.alybadawy.com`
+- `/etc/hosts` contains `172.20.20.5 dc.id.in.alybadawy.com dc` and **no** `127.0.1.1` line
 - Root partition (`/`) shows ~230 GB available on the 256 GB SSD
 - `free -h` shows 8 GB in the Swap row
 - `swapon --show` shows `/swapfile  file  8G`
 - SSH is `active (running)`
-- UFW is enabled with rules listed
+- UFW is enabled with SSH, HTTP/HTTPS, NPM, Netdata, and all Samba AD ports listed
 
 ---
 
 ## Next Steps
 
-The OS is now ready for Docker installation. Proceed to **03-docker-setup.md** to install and configure Docker CE.
+The OS is now ready for Samba 4 Active Directory provisioning. Proceed to **[02 — Active Directory](02-active-directory.md)** to install and provision the AD domain controller.
+
+> **Do not install Docker yet.** Samba AD is a bare-metal service that must be provisioned, verified, and healthy before Docker is introduced. The AD setup guide covers Samba installation, domain provisioning, Kerberos configuration, and DNS verification. NAS mounts and Docker come after.
 
 ---
 
@@ -452,7 +477,7 @@ If the wrong IP is assigned, verify the DHCP reservation on the UDR7 — make su
 
 **Problem: NFS mount fails**
 
-See [Guide 02 — NAS Mounts](02-nas-mounts.md) for full NFS troubleshooting. Quick connectivity check:
+See [Guide 03 — NAS Mounting](03-nas-mounting.md) for full NFS troubleshooting. Quick connectivity check:
 
 ```bash
 ping 172.20.20.10

@@ -270,7 +270,7 @@ Migration procedure:
 ```
 1. Set up UniFi UNAS 4 with the same static IP (172.20.20.10)
 2. Create the same NFS export (/homelab) with subfolders (cloud/, immich/, media/)
-3. rsync data from old NAS to new NAS (see rebuild/02-nas-mounts.md)
+3. rsync data from old NAS to new NAS (see rebuild/03-nas-mounting.md)
 4. Update /etc/fstab on homelab only if paths changed
 5. Run: sudo umount /mnt/nas/homelab && sudo mount -a
 6. Verify: ls /mnt/nas/homelab

@@ -331,6 +331,6 @@ Save the file and test renewal:
 
 Once the certificate is issued and verified:
 
-- Proceed to guide **05-core-infrastructure.md** to bootstrap Portainer and deploy core services
-- NPM and Kanidm both mount `/opt/certs/` directly — no per-service cert copying is needed
+- Proceed to guide **06-core-infrastructure.md** to bootstrap Portainer and deploy core services
+- NPM mounts `/opt/certs/` directly — no per-service cert copying is needed
 - When the cert renews, the deploy hook restarts all running containers automatically

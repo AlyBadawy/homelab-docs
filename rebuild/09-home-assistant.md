@@ -1,11 +1,10 @@
-# 09 — Home Assistant
+# 08 — Home Assistant
 
-Smart home automation hub with access through NPM. Uses host networking for device discovery.
+Smart home automation hub with access through NPM. Uses host networking for device discovery. Users are managed with Home Assistant's built-in local accounts.
 
 ## Prerequisites
 
 - Guide 05 complete — NPM running with wildcard cert
-- Guide 06 complete — Authentik running (for optional OIDC)
 - Docker network: `proxy` present (not used directly — HA runs on host network, but NPM proxies via `127.0.0.1`)
 
 > **Why host network mode?** Home Assistant needs direct access to mDNS and other network protocols to auto-discover smart home devices. Docker bridge networking breaks these features. Because of this, HA is accessed via `127.0.0.1:8123` from NPM, not via a Docker network hostname.
@@ -30,7 +29,7 @@ services:
       - homeassistant_config:/config
       - /etc/localtime:/etc/localtime:ro
     environment:
-      - TZ=America/Los_Angeles
+      - TZ=America/New_York
 
 volumes:
   homeassistant_config:
@@ -49,8 +48,10 @@ Click **Deploy the stack**. Wait 2–3 minutes. Check **Containers → homeassis
 Open `http://172.20.20.5:8123` in your browser.
 
 1. Walk through the onboarding wizard
-2. Create an admin account (you'll keep this — OIDC for HA is optional)
+2. Create your admin account
 3. Finish onboarding and confirm you can reach the HA dashboard
+
+Additional users can be added later under **Settings → People → Add Person**.
 
 ---
 
@@ -96,14 +97,6 @@ http:
 ```
 
 Restart Home Assistant from Portainer (**Containers → homeassistant → Restart**), then verify `https://ha.in.alybadawy.com` loads correctly.
-
----
-
-## Section 5 (Optional): Enable OIDC for Home Assistant
-
-⚠️ Home Assistant has limited OIDC support. The built-in auth system is separate from OIDC — SSO via Authentik requires the `hass-auth-header` or a trusted networks integration, not a standard OAuth2 flow. For most homelab setups, keeping the local HA admin account is simpler and more reliable.
-
-If you do want OIDC-based access control, the recommended approach is **Authentik's forward auth proxy**, which enforces authentication at the NPM layer before the request reaches HA. This is covered as a future enhancement — not required for initial setup.
 
 ---
 

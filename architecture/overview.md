@@ -4,10 +4,12 @@
 
 - **Hardware**: Beelink Mini S12 (Intel N95, 8GB DDR4, 256GB SSD, 2.5 GbE, Wi-Fi 7)
 - **OS**: Ubuntu Server 24.04 LTS
-- **Container Runtime**: Docker (all services containerized)
+- **Identity**: Samba 4 Active Directory DC (bare-metal, provisioned before Docker)
+- **Container Runtime**: Docker (all application services containerized)
 - **NAS**: UGreen NAS (upgrading to UniFi UNAS 4) for bulk storage
 - **AREDN Node**: Mikrotik hAC 2 Lite running WireGuard mesh tunnel (VLAN 40/41)
 - **Domain**: alybadawy.com (DNS via Vercel, internal services via *.in.alybadawy.com)
+- **AD Realm**: `ID.IN.ALYBADAWY.COM` (Samba handles DNS for the `id.in.alybadawy.com` zone)
 - **Access**: LAN + VPN only (no public internet exposure)
 
 ---
@@ -33,11 +35,11 @@
    - Covers all subdomains with one certificate (photos.in.alybadawy.com, cloud.in.alybadawy.com, etc.)
    - Auto-renewal built into Docker stack
 
-4. **Centralized Authentication**
-   - Authentik as OIDC/OAuth2 provider
-   - LLDAP as LDAP backend (simpler than FreeIPA)
-   - Services connect to Authentik for forward auth (HTTP header) or OIDC flows
-   - Single source of truth for user management
+4. **Centralized Identity via Active Directory**
+   - Samba 4 AD DC is the single identity provider — provisioned bare-metal before Docker
+   - Services authenticate via LDAP/LDAPS (Nextcloud, NAS) or OIDC/OAuth2 backed by AD
+   - AD is set up first in the rebuild sequence because Docker and other services depend on it for auth
+   - All services are LAN+VPN only; AD credentials managed centrally and stored in a password manager
 
 5. **NAS for Persistent Data**
    - Large files (photos, videos, documents) stored on NAS via NFS
@@ -69,20 +71,20 @@
                                |
                      (Route via internal DNS)
                                |
-                      [Nginx Proxy Manager]
-                      (Port 443, TLS termination)
-                               |
-                 ┌─────────────┼─────────────┐
-                 |             |             |
-            [Authentik]  [Services]   [PostgreSQL]
-            (Auth layer)  (Nextcloud, [Redis]
-                          Immich,
-                          Home Assistant)
-                 |             |
-                 └─────────────┼─────────────┘
-                               |
-                          [NAS via NFS]
-                        (User data, media)
+                 ┌─────────────┴──────────────┐
+                 |                            |
+      [Samba 4 AD DC]              [Nginx Proxy Manager]
+     (LDAP/Kerberos/DNS)           (Port 443, TLS termination)
+     (bare-metal, pre-Docker)               |
+                 |              ┌───────────┼───────────┐
+                 |              |           |           |
+                 └──────→ [PostgreSQL] [Services]   [Redis]
+                                       (Nextcloud,
+                                        Immich,
+                                        Home Assistant)
+                                            |
+                                       [NAS via NFS]
+                                     (User data, media)
 ```
 
 ### Layer Descriptions
@@ -90,24 +92,27 @@
 **Layer 1: Gateway & VPN**
 - UDR7 handles internet firewall, DHCP, internal DNS, and VPN endpoint
 - Internal DNS resolves `*.in.alybadawy.com` to homelab server LAN IP
+- UDR7 forwards the `id.in.alybadawy.com` DNS zone to Samba AD at 172.20.20.5
 - VPN clients receive LAN IPs and see the same internal DNS
+
+**Layer 1b: Identity (Samba 4 Active Directory)**
+- Runs bare-metal on the homelab server — provisioned before Docker during initial setup
+- Provides LDAP/LDAPS for service authentication and Kerberos for AD clients
+- Runs its own DNS server (port 53) for the `id.in.alybadawy.com` zone; forwards other queries to UDR7
+- Must be healthy before any auth-dependent Docker services start
 
 **Layer 2: Reverse Proxy**
 - Nginx Proxy Manager listens on ports 80 (HTTP redirect) and 443 (HTTPS)
 - Terminates TLS using the wildcard cert
 - Routes requests to appropriate backend services based on hostname
 
-**Layer 3: Authentication & Authorization**
-- Authentik validates user identity via OIDC or forward auth
-- LLDAP provides LDAP interface for Authentik and other integrations
-- PostgreSQL backs both Authentik and LLDAP
-
-**Layer 4: Application Services**
+**Layer 3: Application Services**
 - Nextcloud, Immich, Home Assistant, and other apps run in isolated Docker containers
+- Services authenticate users against Samba AD via LDAP or OIDC
 - Services may use local databases (PostgreSQL, Redis) for sessions and caching
 - Large persistent data stored on NAS
 
-**Layer 5: Data Persistence**
+**Layer 4: Data Persistence**
 - PostgreSQL: global relational database (shared by identity and app services)
 - Redis: cache and session store
 - NAS (NFS mount): user files, media library, backups
@@ -132,9 +137,8 @@
    - NPM proxies request to Nextcloud container (e.g., http://nextcloud:80)
 
 4. **Authentication Check**
-   - Nextcloud is configured for forward auth via Authentik
-   - Nextcloud forwards auth request to Authentik via special header
-   - Authentik checks session/token; if valid, adds `Remote-User` header and allows request
+   - Nextcloud checks the user's session cookie against its own local user database
+   - If no session, Nextcloud presents its own login page
 
 5. **Data Operations**
    - If request accesses user files, Nextcloud reads from NAS (NFS mount at /mnt/nfs/nextcloud)
@@ -155,21 +159,19 @@
 | Component | Estimated RAM | Notes |
 |-----------|---------------|-------|
 | Ubuntu base system | 300 MB | Kernel + essential daemons |
+| Samba 4 AD DC | 200–350 MB | Bare-metal; runs samba-ad-dc service |
 | Docker daemon | 100 MB | Container runtime overhead |
 | Dashboard (Rails) | 100 MB | Custom homelab dashboard |
 | Portainer | 50 MB | Container management UI |
 | Netdata | 150 MB | Metrics collection & dashboard |
 | Nginx Proxy Manager | 50 MB | Reverse proxy & routing |
-| LLDAP | 30 MB | LDAP server (lightweight) |
-| Authentik (server) | 400 MB | Auth server + request handler |
-| Authentik (worker) | 200 MB | Background job processor |
 | PostgreSQL (global) | 150 MB | Runs with shared_buffers=256MB |
 | Redis | 50 MB | Session & cache store |
 | Nextcloud | 300 MB | PHP-FPM container |
 | Immich (server) | 400 MB | API server |
 | Immich (ML service) | 800 MB – 1.5 GB | ML model inference (heaviest) |
 | Home Assistant | 400 MB | Automation engine |
-| **Total (peak)** | **~3.6 – 4.2 GB** | Under 8GB RAM + 8GB swap |
+| **Total (peak)** | **~3.1 – 3.9 GB** | Under 8GB RAM + 8GB swap |
 
 ### Why This Works
 

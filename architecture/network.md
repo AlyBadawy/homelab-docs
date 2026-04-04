@@ -17,11 +17,13 @@ The home network uses UniFi VLAN segmentation for isolation between device class
 
 ### Key Device Assignments (Servers VLAN — 172.20.20.0/24)
 
-| Device                      | IP           | Notes                                       |
-| --------------------------- | ------------ | ------------------------------------------- |
-| UDR7 (Servers VLAN gateway) | 172.20.20.1  | Also the DNS server for this VLAN           |
-| NAS (UGreen → UniFi UNAS 4) | 172.20.20.10 | NFS exports for Nextcloud + Immich          |
-| Homelab server (Beelink)    | 172.20.20.5  | Static IP — hostname `lab.in.alybadawy.com` |
+| Device                      | IP           | Notes                                                                 |
+| --------------------------- | ------------ | --------------------------------------------------------------------- |
+| UDR7 (Servers VLAN gateway) | 172.20.20.1  | Main DNS server for all VLANs; forwards `id.in.alybadawy.com` to DC  |
+| NAS (UGreen → UniFi UNAS 4) | 172.20.20.10 | NFS exports for Nextcloud + Immich                                    |
+| Homelab server (Beelink)    | 172.20.20.5  | OS hostname: `dc.id.in.alybadawy.com` (required by Samba AD); also reachable as `lab.in.alybadawy.com` via UDR7 DNS alias |
+
+> **Note on hostname:** Samba AD requires the machine's OS hostname to match the DC FQDN (`dc.id.in.alybadawy.com`). All existing DNS aliases (`lab.in.alybadawy.com`, `*.in.alybadawy.com` service subdomains) continue to work via UDR7 local DNS records pointing to `172.20.20.5`.
 
 > **Why Servers VLAN?** Placing both the homelab and NAS on the same VLAN means NFS traffic between them stays entirely within VLAN 20 at LAN speeds, without traversing firewall rules between VLANs. Personal and IoT devices access services through NPM via inter-VLAN routing controlled by the UDR7 firewall.
 
@@ -64,8 +66,6 @@ The UDR7 DNS server overrides public DNS for internal clients, ensuring direct r
 | `dockers.in.alybadawy.com` | `lab.in.alybadawy.com` |
 | `netdata.in.alybadawy.com` | `lab.in.alybadawy.com` |
 | `nas-ui.in.alybadawy.com`  | `lab.in.alybadawy.com` |
-| `lldap.in.alybadawy.com`   | `lab.in.alybadawy.com` |
-| `auth.in.alybadawy.com`    | `lab.in.alybadawy.com` |
 | `photos.in.alybadawy.com`  | `lab.in.alybadawy.com` |
 | `cloud.in.alybadawy.com`   | `lab.in.alybadawy.com` |
 
@@ -75,6 +75,14 @@ All TTLs are set to Auto. Rather than a single wildcard `*.in.alybadawy.com` A r
 - Each subdomain CNAME resolves to `lab.in.alybadawy.com`, which resolves to `172.20.20.5`
 - Traffic arrives directly at NPM on the homelab — no internet roundtrip (no hairpin NAT)
 - New services require a new CNAME entry in UDR7's Local DNS Records
+
+**DNS Forward Zone (Active Directory):**
+
+| Zone                    | Forwarded To  | Purpose                                              |
+| ----------------------- | ------------- | ---------------------------------------------------- |
+| `id.in.alybadawy.com`   | `172.20.20.5` | Delegates all AD DNS queries to Samba DC on port 53  |
+
+Configured in UniFi → Network → DNS → DNS Forwarding. This allows all VLANs to resolve AD records (DC hostname, Kerberos SRV records, LDAP SRV records) through the UDR7, which in turn asks Samba. Samba forwards non-AD queries back to `172.20.20.1` (UDR7).
 
 ### Why This Two-Level Setup Works for TLS
 
@@ -135,13 +143,19 @@ VPN Client (remote)
 
 ### Homelab Server Ports
 
-| Port                    | Service                  | Scope                        | Purpose                                  |
-| ----------------------- | ------------------------ | ---------------------------- | ---------------------------------------- |
-| 80                      | NPM (HTTP)               | LAN + VPN                    | Redirect HTTP → HTTPS                    |
-| 443                     | NPM (HTTPS)              | LAN + VPN                    | All web services via reverse proxy       |
-| 19999                   | Netdata                  | Host network, LAN accessible | Metrics dashboard (also proxied via NPM) |
-| 3890                    | LLDAP                    | Docker internal network only | LDAP protocol (not exposed to LAN)       |
-| All other service ports | (Application containers) | Docker networks only         | Internal communication only              |
+| Port          | Service        | Scope                        | Purpose                                              |
+| ------------- | -------------- | ---------------------------- | ---------------------------------------------------- |
+| 53 (TCP/UDP)  | Samba AD (DNS) | LAN (Servers VLAN + forwarded from UDR7) | AD zone DNS — `id.in.alybadawy.com`    |
+| 88 (TCP/UDP)  | Samba AD (Kerberos) | LAN                    | Kerberos ticket issuance for AD clients              |
+| 389 (TCP)     | Samba AD (LDAP) | LAN (Docker + LAN)          | LDAP bind for services (Nextcloud, NAS, etc.)        |
+| 445 (TCP)     | Samba AD (SMB) | LAN                          | AD DC management (samba-tool, Windows admin tools)   |
+| 464 (TCP/UDP) | Samba AD (Kerberos pw) | LAN               | Kerberos password change                             |
+| 636 (TCP)     | Samba AD (LDAPS) | LAN (Docker + LAN)         | Secure LDAP for services                             |
+| 49152–65535   | Samba AD (RPC) | LAN                          | Dynamic RPC ports for AD DC replication/management   |
+| 80            | NPM (HTTP)     | LAN + VPN                    | Redirect HTTP → HTTPS                                |
+| 443           | NPM (HTTPS)    | LAN + VPN                    | All web services via reverse proxy                   |
+| 19999         | Netdata        | Host network, LAN accessible | Metrics dashboard (also proxied via NPM)             |
+| All other service ports | (Docker containers) | Docker networks only | Internal communication only                 |
 
 ### Firewall Notes
 
@@ -157,9 +171,9 @@ VPN Client (remote)
 
 ### Network Design Goals
 
-- Isolate services by function (identity, proxy, apps)
+- Isolate services by function (proxy, apps)
 - Minimize cross-network traffic (services talk over bridges)
-- Ensure critical services (auth, database) are not directly exposed
+- Identity (Samba AD) runs bare-metal — not inside Docker — and is reachable on host LAN ports
 
 ### Network Definitions
 
@@ -169,53 +183,24 @@ VPN Client (remote)
 **Services on this network**:
 
 - Nginx Proxy Manager (main traffic handler)
-- Authentik (for authentication checks)
-- Any services that need external HTTP access
+- Any services that need external HTTP access via NPM
 
-**Rationale**: NPM and Authentik sit on the proxy network to intercept and route traffic before it reaches backend services.
+**Rationale**: NPM sits on the proxy network to receive incoming traffic and route it to backend services.
 
-#### 2. `identity` Network
+#### 2. `apps` Network
 
-**Purpose**: Identity and authentication infrastructure
-**Services on this network**:
-
-- LLDAP (LDAP server)
-- Authentik server (processes auth requests)
-- Authentik worker (background jobs)
-- PostgreSQL (identity database)
-- Redis (session/cache store)
-
-**Rationale**: Isolated network for sensitive authentication data; only accessible to auth-aware services.
-
-#### 3. `apps` Network
-
-**Purpose**: Application services and their data stores
+**Purpose**: Application services and their shared data stores
 **Services on this network**:
 
 - Nextcloud
 - Immich (server + ML)
 - Home Assistant
-- PostgreSQL (shared by apps, also on identity network)
-- Redis (shared by apps, also on identity network)
+- PostgreSQL (global shared instance)
+- Redis (global shared instance)
 
-**Rationale**: Apps talk to each other and shared infrastructure on this bridge.
+**Rationale**: All apps and their infrastructure share this bridge for low-latency internal communication.
 
-### Cross-Network Connectivity
-
-**PostgreSQL**: Joined to both `identity` and `apps` networks
-
-- Allows identity services (LLDAP, Authentik) to query their databases
-- Allows app services (Nextcloud, Immich) to query their databases
-
-**Redis**: Joined to both `identity` and `apps` networks
-
-- Allows Authentik to cache sessions and tokens
-- Allows apps to use Redis for caching and temporary data
-
-**Authentik**: Joined to both `proxy` and `identity` networks
-
-- Communicates with NPM over the proxy network for forward auth checks
-- Communicates with LLDAP and PostgreSQL over the identity network
+> **Note on identity:** Samba 4 AD is a bare-metal service running on the host, not in Docker. Services that need LDAP/LDAPS authentication connect to `172.20.20.5:389` or `172.20.20.5:636` directly — or use `host.docker.internal` if needed — rather than via a Docker network.
 
 ### Network Diagram
 
@@ -224,22 +209,17 @@ VPN Client (remote)
 │                      Docker Host                            │
 ├─────────────────────────────────────────────────────────────┤
 │                                                             │
+│  [Samba 4 AD DC] (bare-metal, ports 53/88/389/445/636)      │
+│        ↑ ↓  (LAN reachable; Docker containers connect via   │
+│              host IP 172.20.20.5 or host.docker.internal)   │
+│                                                             │
 │  ┌──────────────── proxy network ────────────────┐          │
 │  │                                               │          │
-│  │  [Nginx Proxy Manager]  ←→  [Authentik]       │          │
+│  │           [Nginx Proxy Manager]               │          │
 │  │                                               │          │
 │  └─────────────────────────────────────────────-─┘          │
 │           ↑                                                 │
-│           │ (External traffic: ports 80, 443)                │
-│                                                             │
-│  ┌──────────────── identity network ────────────────┐       │
-│  │                                                  │       │
-│  │  [LLDAP] ←→ [Authentik] ←→ [PostgreSQL]          │       │
-│  │                              ←→ [Redis]          │       │
-│  │                                                  │       │
-│  └─────────────────────────────────────────────---──┘       │
-│                      ↑                                      │
-│          (Authentik bridges proxy & identity)               │
+│           │ (External traffic: ports 80, 443)               │
 │                                                             │
 │  ┌──────────────── apps network ────────────────────┐       │
 │  │                                                  │       │
@@ -262,12 +242,6 @@ networks:
       config:
         - subnet: 172.20.0.0/16
 
-  identity:
-    driver: bridge
-    ipam:
-      config:
-        - subnet: 172.21.0.0/16
-
   apps:
     driver: bridge
     ipam:
@@ -279,35 +253,22 @@ services:
     networks:
       - proxy
 
-  authentik-server:
-    networks:
-      - proxy
-      - identity
-
-  authentik-worker:
-    networks:
-      - identity
-
-  lldap:
-    networks:
-      - identity
-
   postgres:
     networks:
-      - identity
       - apps
 
   redis:
     networks:
-      - identity
       - apps
 
   nextcloud:
     networks:
+      - proxy
       - apps
 
   immich-server:
     networks:
+      - proxy
       - apps
 
   immich-ml:
@@ -316,7 +277,7 @@ services:
 
   home-assistant:
     networks:
-      - apps
+      - proxy
 ```
 
 ---
@@ -331,7 +292,7 @@ services:
 3. Client initiates TLS to NPM (homelab:443)
 4. NPM terminates TLS, checks Host header
 5. NPM routes to Immich container on apps network
-6. Immich checks auth via Authentik (proxy & identity networks)
+6. Immich validates the user session (OIDC or built-in auth backed by Samba AD)
 7. If authenticated, Immich queries PostgreSQL (apps network)
 8. Immich fetches media from NAS (/mnt/nfs/immich)
 9. Response returns through NPM → TLS → Client
@@ -348,15 +309,14 @@ Example: Immich Server → PostgreSQL
 4. Data transaction completes
 ```
 
-### Service → Authentication Check
+### Service → Authentication Check (LDAP example)
 
 ```
-1. NPM receives request, configured with forward auth for photos.in.alybadawy.com
-2. NPM internally connects to Authentik (proxy network)
-3. Authentik validates session cookie/token
-4. Authentik responds with 200 OK + Remote-User header
-5. NPM allows request to proceed to Immich
-6. Immich (optionally) also checks Remote-User for additional auth
+1. Nextcloud receives login request
+2. Nextcloud connects to Samba AD at 172.20.20.5:636 (LDAPS)
+3. Samba validates credentials against the AD user database
+4. Samba returns user attributes (uid, groups, email)
+5. Nextcloud grants access and establishes a session
 ```
 
 ---
@@ -365,28 +325,30 @@ Example: Immich Server → PostgreSQL
 
 ### Network Isolation
 
-- **LLDAP port 3890** is internal-only; never exposed to LAN or internet
-- **PostgreSQL port 5432** is internal-only; accessed only by containers on identity/apps networks
-- **Redis port 6379** is internal-only; accessed only by containers on identity/apps networks
+- **Samba AD ports (389, 636, 88, etc.)** are LAN-accessible within Servers VLAN; not forwarded to internet
+- **PostgreSQL port 5432** is internal-only; accessed only by containers on the `apps` network
+- **Redis port 6379** is internal-only; accessed only by containers on the `apps` network
 - **NPM port 81 (admin UI)** is accessible from LAN but should use strong credentials; consider further restricting with firewall rules
 
 ### TLS & Encryption
 
 - **External traffic (ports 80, 443)**: Always encrypted via TLS after HTTP→HTTPS redirect
 - **Internal Docker traffic**: Unencrypted but isolated to local bridges (not routable to LAN)
+- **LDAPS (port 636)**: Services connecting to Samba AD use LDAPS for encrypted credential exchange
 - **NAS traffic (NFS)**: Unencrypted but on trusted LAN; consider NFS over TLS in future if security posture changes
 
 ### Authentication
 
-- **Authentik forward auth** enforces login for all services, even if accessed directly via LAN
-- **LLDAP** is not internet-facing; credentials are not transmitted over the internet
+- **Samba 4 AD** is the centralized identity provider; credentials are never stored per-service
+- **LDAPS (636)** used by services like Nextcloud and NAS for secure directory lookups
+- **Samba AD is not internet-facing**; LDAP/Kerberos ports are LAN-only
 - **VPN access** requires WireGuard/OpenVPN keys; users on VPN are treated as LAN users
 
 ### Firewall Defense-in-Depth
 
 - **UDR7 firewall**: First line of defense; blocks unsolicited inbound traffic
 - **Docker bridge isolation**: Second line; prevents direct access to internal ports
-- **Service-level auth**: Third line; Authentik validates user identity regardless of network
+- **Samba AD auth**: Third line; services validate credentials against AD regardless of network path
 
 ---
 

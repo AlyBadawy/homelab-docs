@@ -1,11 +1,10 @@
-# 07 — Nextcloud
+# 06 — Nextcloud
 
-Personal cloud storage and file sync, with users authenticated via Kanidm LDAP.
+Personal cloud storage and file sync. Users are managed with Nextcloud's built-in accounts.
 
 ## Prerequisites
 
 - Guide 05 complete — PostgreSQL and Redis running
-- Guide 06 complete — Kanidm running, `nextcloud_reader` service account created
 - Docker networks: `proxy` and `apps` present
 - NAS mounted at `/mnt/nas/homelab/cloudnext`
 
@@ -74,7 +73,7 @@ In the **Environment variables** section, add:
 | -------------------------- | ------------------------------------------------------------------------------------- |
 | `POSTGRES_PASSWORD`        | _(the `postgres` superuser password set when deploying the postgres stack in Guide 05)_ |
 | `NEXTCLOUD_ADMIN_USER`     | `aly`                                                                                 |
-| `NEXTCLOUD_ADMIN_PASSWORD` | _(strong temporary password — you'll disable this account after LDAP is working)_    |
+| `NEXTCLOUD_ADMIN_PASSWORD` | _(strong password)_ |
 
 Click **Deploy the stack**. Wait 1–2 minutes for initialization. Check **Containers → nextcloud → Logs**. Watch for: `New nextcloud instance initialized`.
 
@@ -140,72 +139,12 @@ You should see `HTTP/2 200` with no `http://` redirects in the chain.
 
 ---
 
-## Section 5: Configure Kanidm LDAP Authentication
-
-Nextcloud uses the **LDAP User and Group Backend** app to authenticate users directly against Kanidm. The `nextcloud_reader` service account created in Guide 06 is used for the LDAP bind.
-
-### 5.1: Install the LDAP App
-
-1. Log in to `https://cloud.in.alybadawy.com` with the admin credentials from Section 2
-2. Click the admin avatar (top right) → **Apps**
-3. Search for `LDAP user and group backend`
-4. Click **Enable**
-
-### 5.2: Configure the LDAP Connection
-
-Go to **Administration** (avatar → Administration) → **LDAP/AD Integration**.
-
-**Server tab:**
-
-| Field    | Value                 |
-| -------- | --------------------- |
-| Host     | `172.20.20.5`         |
-| Port     | `636`                 |
-| User DN  | `dn=token`            |
-| Password | _(the `nextcloud_reader` API token from Guide 06)_ |
-| Base DN  | `dc=in,dc=alybadawy,dc=com` |
-
-Check **Use TLS** (StartTLS) or select **Use SSL** depending on the option shown — for port 636 it should be SSL/LDAPS.
-
-Click **Test Base DN** — you should see a green confirmation.
-
-**Users tab:**
-
-- User object classes: `posixaccount`
-- Click **Verify settings and count users** — your Kanidm users should be detected
-
-**Groups tab:**
-
-- Group object classes: `group`
-- Click **Verify settings and count groups** — `homelab_users` and `homelab_admins` should appear
-
-**Advanced tab → Special Attributes:**
-
-| Field         | Value  |
-| ------------- | ------ |
-| Internal Username | `uid` |
-| Email field   | `mail` |
-
-Click **Save** on each tab.
-
-### 5.3: Test LDAP Login
-
-1. Log out from Nextcloud (avatar → Log out)
-2. Log in with your Kanidm username and password
-3. You should be logged in as the Kanidm user
-
-Once LDAP login is confirmed working, disable the initial local admin account in **Administration → Users** for security.
-
----
-
 ## Verification Checklist
 
 - [ ] Nextcloud running: `docker ps | grep nextcloud` shows `Up`
 - [ ] `https://cloud.in.alybadawy.com` loads, SSL valid
 - [ ] `curl -IL https://cloud.in.alybadawy.com` shows `HTTP/2 200` with no HTTP redirects
-- [ ] Admin login works with initial credentials
-- [ ] LDAP app installed and connected — users count shows correctly
-- [ ] Kanidm user can log in with their username and password
+- [ ] Admin login works
 - [ ] iOS/macOS Nextcloud client authenticates without looping
 - [ ] Upload a file → confirm it lands at `/mnt/nas/homelab/cloudnext`
 
@@ -227,27 +166,6 @@ Then redeploy the stack in Portainer.
 **iOS/macOS client stuck in grant-access loop:**
 
 Ensure Section 3 (NPM `proxy_set_header` lines) and Section 4 (`occ` commands) are both complete. The `overwriteprotocol` setting is the most common missing piece.
-
-**LDAP app can't connect / "Invalid credentials":**
-
-Verify the `nextcloud_reader` token is correct and Kanidm is reachable from the Nextcloud container:
-
-```bash
-docker exec nextcloud curl -v --insecure ldaps://172.20.20.5:636
-```
-
-Check that the token hasn't expired in Kanidm (`kanidm service-account api-token status --name idm_admin nextcloud_reader`).
-
-**"No users found" after LDAP configuration:**
-
-Verify users have POSIX enabled in Kanidm:
-
-```bash
-docker run --rm -it -e KANIDM_URL=https://id.in.alybadawy.com kanidm/tools:latest \
-  kanidm person posix show --name idm_admin alybadawy
-```
-
-Non-POSIX accounts are not visible to LDAP clients. Run `kanidm person posix set` if POSIX attributes are missing.
 
 **Large file uploads fail:**
 

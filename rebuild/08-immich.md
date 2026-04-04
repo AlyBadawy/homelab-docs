@@ -1,12 +1,11 @@
-# 08 — Immich
+# 07 — Immich
 
-Self-hosted photo and video library with AI-powered features, authenticated through Authentik.
+Self-hosted photo and video library with AI-powered features. Users are managed with Immich's built-in accounts.
 
 ## Prerequisites
 
-- Guide 06 complete — LLDAP and Authentik running
+- Guide 05 complete — core infrastructure running (NPM, Redis)
 - Docker networks: `proxy` and `apps` present
-- Redis running on the `apps` network
 - NAS mounted at `/mnt/nas/homelab/immich`
 
 > Immich uses its **own dedicated PostgreSQL** instance (with the pgvector extension for AI features). It does not share the global PostgreSQL from Guide 05.
@@ -82,8 +81,8 @@ networks:
 
 In the **Environment variables** section, add:
 
-| Variable             | Value                    |
-| -------------------- | ------------------------ |
+| Variable             | Value                      |
+| -------------------- | -------------------------- |
 | `IMMICH_DB_PASSWORD` | _(strong unique password)_ |
 
 Click **Deploy the stack**. Wait 2–3 minutes for the database to initialize. Check **Containers → immich-server → Logs**. Watch for: `Immich Server is listening`.
@@ -113,66 +112,16 @@ proxy_send_timeout 600s;
 proxy_buffering off;
 ```
 
-These settings support large video file uploads.
-
 ---
 
 ## Section 3: Complete Immich Initial Setup
 
 Open `https://photos.in.alybadawy.com`. You'll be taken through an onboarding wizard:
 
-1. Create an initial admin account (temporary — you'll use OIDC for production)
+1. Create your admin account
 2. Complete the wizard
 
----
-
-## Section 4: Create Authentik OIDC Provider
-
-In **Authentik Admin → Applications → Providers**:
-
-1. Click **Create → OAuth2/OpenID Connect Provider**
-2. Fill in:
-   - **Name:** `Immich OIDC`
-   - **Client Type:** `Confidential`
-   - **Redirect URIs:** `https://photos.in.alybadawy.com/auth/login`
-3. Click **Create**
-4. Copy the **Client ID** and **Client Secret** — you'll need both in Section 5
-
-Then create the Authentik Application:
-
-In **Authentik Admin → Applications → Applications**:
-
-1. Click **Create**
-2. Fill in:
-   - **Name:** `Immich`
-   - **Slug:** `immich`
-   - **Provider:** `Immich OIDC`
-3. Click **Create**
-
----
-
-## Section 5: Configure OAuth in Immich
-
-1. Log into Immich with the admin account you created in Section 3
-2. Go to **Administration** (top-right icon) → **Settings**
-3. Expand **OAuth Authentication**
-4. Toggle **Enable** ON
-5. Fill in:
-   - **Issuer URL:** `https://auth.in.alybadawy.com/application/o/immich/`
-   - **Client ID:** _(from Section 4)_
-   - **Client Secret:** _(from Section 4)_
-   - **Scope:** `openid profile email` (auto-filled)
-   - **Auto-register new users:** On
-6. Click **Save**
-
----
-
-## Section 6: Test OIDC Login
-
-1. Log out from Immich
-2. On the login page, click **Login with OAuth**
-3. You'll be redirected to Authentik — log in with your LLDAP account
-4. You'll be redirected back into Immich as your LLDAP user
+Additional users can be added later under **Administration → Users**.
 
 ---
 
@@ -180,9 +129,7 @@ In **Authentik Admin → Applications → Applications**:
 
 - [ ] All Immich containers running: `docker ps | grep immich` — all show `Up`
 - [ ] `https://photos.in.alybadawy.com` loads, SSL valid
-- [ ] Initial admin login works
-- [ ] OAuth configured in Immich settings
-- [ ] LLDAP user can log in via OAuth → Authentik
+- [ ] Admin login works
 - [ ] Upload a photo → confirm it lands at `/mnt/nas/homelab/immich`
 - [ ] Machine learning container not OOMKilled: `docker stats immich-machine-learning`
 
@@ -198,11 +145,11 @@ docker logs immich-server | tail -30
 
 Usually means `immich-postgres` isn't ready yet. Wait 30 seconds and check again — `depends_on` doesn't wait for the DB to be fully ready, only for the container to start.
 
-**OAuth not working / "invalid client" error:**
+**Photos not appearing after upload:**
 
-- Double-check the Client Secret (copy-paste carefully — it's easy to miss a character)
-- Verify the Issuer URL ends with a trailing slash: `https://auth.in.alybadawy.com/application/o/immich/`
-- In Authentik, confirm the application slug is exactly `immich`
+```bash
+docker exec immich-server ls /usr/src/app/upload
+```
 
 **ML container OOMKilled:**
 
@@ -210,11 +157,4 @@ Usually means `immich-postgres` isn't ready yet. Wait 30 seconds and check again
 # Increase memory limit in Portainer stack editor:
 mem_limit: 4g
 # Then redeploy the stack
-```
-
-**Photos not appearing after upload:**
-
-```bash
-# Check NAS mount is accessible from the container
-docker exec immich-server ls /usr/src/app/upload
 ```
