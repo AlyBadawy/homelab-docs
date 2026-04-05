@@ -106,11 +106,9 @@ You should see: `fullchain.cer`, `ca.cer`, `in.alybadawy.com.cer`, `in.alybadawy
 
 ---
 
-## Step 5: Create the Certificate Deployment Hook Script
+## Step 5: Create the /opt/certs/ Directory
 
-The deployment hook is called by acme.sh whenever the certificate is renewed. It restarts all running Docker containers so every service picks up the new certificate automatically — no per-service copying or custom logic required.
-
-First, create the `/opt/certs/` directory — this is the centralized certificate location for both NPM and Kanidm:
+Create the centralized certificate directory that NPM and other services will mount:
 
 ```bash
 sudo mkdir -p /opt/certs
@@ -120,41 +118,11 @@ sudo chown $USER:$USER /opt/certs
 
 The `chown` is required because acme.sh runs as your user (not root) and needs write access to deploy cert files into this directory.
 
-Create the script at `/opt/certs/deploy-cert.sh`:
-
-```bash
-#!/bin/bash
-# Called by acme.sh after cert installation or renewal.
-# Restarts all running Docker containers so they pick up the renewed certificate.
-# Using docker ps -q | xargs -r docker restart handles the case where some
-# containers don't exist yet (xargs -r skips the command if input is empty).
-
-# Restart all running containers
-docker ps -q | xargs -r docker restart
-
-# Log the deployment
-echo "[$(date)] Certificate deployed successfully" >> /opt/certs/deploy.log
-```
-
-> **Note:** `$CERT_PATH` and similar variables are not available in `--reloadcmd`. They are only set in acme.sh deploy hooks. The cert files are already installed by acme.sh before this script runs, so no copying is needed here. Because all services (NPM, Kanidm, etc.) mount `/opt/certs/` directly, a single restart is all that's needed.
-
-Make the script executable:
-
-```bash
-chmod +x /opt/certs/deploy-cert.sh
-```
-
-Verify the script:
-
-```bash
-ls -la /opt/certs/deploy-cert.sh
-```
-
 ---
 
-## Step 6: Install the Certificate with Deploy Hook
+## Step 6: Install the Certificate
 
-Install the certificate to its final location and register the deployment hook:
+Install the certificate to its final location:
 
 ```bash
 ~/.acme.sh/acme.sh --install-cert \
@@ -162,14 +130,12 @@ Install the certificate to its final location and register the deployment hook:
   --cert-file /opt/certs/cert.pem \
   --key-file /opt/certs/key.pem \
   --ca-file /opt/certs/chain.pem \
-  --fullchain-file /opt/certs/fullchain.pem \
-  --reloadcmd "/opt/certs/deploy-cert.sh"
+  --fullchain-file /opt/certs/fullchain.pem
 ```
 
 This command:
 
 - Copies the certificate files from the acme.sh cache to `/opt/certs/`
-- Registers the deploy hook to run on every renewal
 - Creates symlinks in the acme.sh cache for management
 
 Verify the files were created:
@@ -211,14 +177,7 @@ To test the renewal process before the certificate actually expires:
 The `--force` flag skips the "not yet due for renewal" check. This is useful for:
 
 - Testing the renewal workflow
-- Verifying the deployment hook runs
-- Confirming NPM reloads correctly
-
-Check the log:
-
-```bash
-tail -f /opt/certs/deploy.log
-```
+- Confirming the cert files in `/opt/certs/` are updated
 
 ---
 
@@ -271,29 +230,6 @@ Both SANs must be present — the cert covers the root subdomain and all service
    dig _acme-challenge.in.alybadawy.com TXT
    ```
 
-### Deployment hook doesn't run or NPM doesn't reload
-
-**Problem:** Certificate is renewed but NPM doesn't pick up the new cert.
-
-**Solutions:**
-
-1. Verify the script is executable:
-   ```bash
-   ls -la /opt/certs/deploy-cert.sh
-   ```
-2. Check if NPM container is running:
-   ```bash
-   docker ps | grep npm
-   ```
-3. Check the deploy log:
-   ```bash
-   cat /opt/certs/deploy.log
-   ```
-4. Manually trigger renewal:
-   ```bash
-   ~/.acme.sh/acme.sh --renew -d "in.alybadawy.com" --force
-   ```
-
 ### Vercel API token expires or is rotated
 
 If your Vercel token is rotated or expires, update it in the acme.sh config:
@@ -320,10 +256,9 @@ Save the file and test renewal:
 ## Reference: Certificate Lifecycle
 
 1. **Issuance (Step 4):** Certificate is created and valid for 90 days
-2. **Installation (Step 6):** Certificate files are deployed to `/opt/certs/`; deploy hook is registered with acme.sh
-3. **Automatic Renewal:** acme.sh cron runs daily; if cert is within 30 days of expiry, it renews automatically
-4. **Deployment:** Upon successful renewal, the deploy hook (Step 5) runs `docker ps -q | xargs -r docker restart` — all running containers pick up the new cert from `/opt/certs/` automatically
-5. **Verification (Step 9):** Check cert expiry and renewal status anytime
+2. **Installation (Step 6):** Certificate files are deployed to `/opt/certs/`
+3. **Automatic Renewal:** acme.sh cron runs daily; if cert is within 30 days of expiry, it renews and redeploys the files to `/opt/certs/` automatically
+4. **Verification (Step 9):** Check cert expiry and renewal status anytime
 
 ---
 
@@ -333,4 +268,4 @@ Once the certificate is issued and verified:
 
 - Proceed to guide **06-core-infrastructure.md** to bootstrap Portainer and deploy core services
 - NPM mounts `/opt/certs/` directly — no per-service cert copying is needed
-- When the cert renews, the deploy hook restarts all running containers automatically
+- When the cert renews, acme.sh automatically redeploys the updated files to `/opt/certs/`

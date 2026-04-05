@@ -104,18 +104,18 @@ Create the three bridge networks used for service isolation:
 # Proxy network (for reverse proxy and external-facing services)
 docker network create proxy
 
-# Identity network (for authentication services and backends)
-docker network create identity
+# Databases network
+docker network create databases
 
 # Apps network (for application services and their backends)
 docker network create apps
 ```
 
-| Network    | Purpose                                                      |
-| ---------- | ------------------------------------------------------------ |
-| `proxy`    | Reverse proxy and externally-exposed services                |
-| `identity` | Authentication services (Kanidm) and their backends          |
-| `apps`     | User-facing applications (Nextcloud, Immich, Home Assistant) |
+| Network     | Purpose                                                      |
+| ----------- | ------------------------------------------------------------ |
+| `proxy`     | Reverse proxy and externally-exposed services                |
+| `databases` | Postgresql and Redis services                                |
+| `apps`      | User-facing applications (Nextcloud, Immich, Home Assistant) |
 
 Verify:
 
@@ -133,7 +133,7 @@ sudo systemctl status docker
 sudo systemctl is-enabled docker
 
 # All three networks present
-docker network ls | grep -E "proxy|identity|apps"
+docker network ls | grep -E "proxy|databases|apps"
 ```
 
 Expected: docker is `active (running)` and `enabled`; all three networks listed.
@@ -156,7 +156,7 @@ After the homelab comes back up (~30–60 seconds), SSH back in:
 
 ```bash
 sudo systemctl status docker
-docker network ls | grep -E "proxy|identity|apps"
+docker network ls | grep -E "proxy|databases|apps"
 ```
 
 Expected: Docker is running, all three networks are present.

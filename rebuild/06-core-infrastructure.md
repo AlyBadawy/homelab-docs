@@ -1,27 +1,17 @@
-# 05 — Core Infrastructure
+# 06 — Core Infrastructure
 
-This guide bootstraps Portainer (the first container), then deploys NPM, Kanidm, and the shared database layer. The deployment order matters: Portainer and Kanidm are brought up first because everything else either depends on or is managed through them.
+This guide bootstraps Portainer (the first container), then deploys NPM and the shared database layer through the Portainer UI.
 
 **Deployment order in this guide:**
 
 1. **Portainer** — first container; manages all subsequent stacks
-2. **Kanidm** — second container; identity service needed by NAS and apps (deployed via Guide 06 immediately after Portainer is set up)
-3. **NPM** — reverse proxy; makes all web UIs accessible via subdomain
-4. **PostgreSQL + Redis** — shared database layer for apps
+2. **NPM** — reverse proxy; makes all web UIs accessible via subdomain
+3. **PostgreSQL + Redis** — shared database layer for apps
 
 **Prerequisites:**
 
-- Guide 03 complete — Docker installed, networks created (`proxy`, `identity`, `apps`)
-- Guide 04 complete — wildcard cert in `/opt/certs/`
-
-> **About `/opt/stacks/`:** Service config files (compose files, config files) live under `/opt/stacks/<service>/`. Create the root directory once here, then each service's subdirectory is created without `sudo` as you go:
->
-> ```bash
-> sudo mkdir -p /opt/stacks
-> sudo chown $USER:$USER /opt/stacks
-> ```
->
-> Run this now before proceeding. After that, all `mkdir -p /opt/stacks/<service>` commands in this and future guides work without `sudo`.
+- Guide 04 complete — Docker installed, networks created (`proxy`, `databases`, `apps`)
+- Guide 05 complete — wildcard cert in `/opt/certs/`
 
 > **About Portainer data:** Portainer stores all of its runtime data — stacks, users, settings, secrets, endpoints — in the Docker named volume `portainer_data` (at `/var/lib/docker/volumes/portainer_data/`). The compose file used to bootstrap it is a one-time script; after first launch, everything is managed through the Portainer UI.
 
@@ -102,10 +92,6 @@ docker ps --format "table {{.Names}}\t{{.Status}}"
 ```
 
 Portainer should show `Up X seconds`. Then open `http://172.20.20.5:9000` to confirm the UI is accessible.
-
----
-
-> **Next: deploy Kanidm before NPM.** Kanidm is the second core service and should be running before NPM so its proxy host can be configured immediately. Proceed to **Guide 06, Section 1** now, then return here for NPM.
 
 ---
 
@@ -301,9 +287,9 @@ networks:
 
 In the **Environment variables** section, add:
 
-| Variable            | Value                                                                            |
-| ------------------- | -------------------------------------------------------------------------------- |
-| `POSTGRES_PASSWORD` | _(strong generated password — this is the `postgres` superuser password)_        |
+| Variable            | Value                                                                     |
+| ------------------- | ------------------------------------------------------------------------- |
+| `POSTGRES_PASSWORD` | _(strong generated password — this is the `postgres` superuser password)_ |
 
 Generate a strong password:
 
