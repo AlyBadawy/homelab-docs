@@ -216,18 +216,25 @@ Now that the share is mounted, set the correct ownership so Docker containers ca
 sudo mkdir -p /mnt/nas/homelab/{cloudnext,immich,media}
 ```
 
-Then set ownership:
+All services that write to the NAS run as the `homelab` NAS user. Look up its UID and GID on the NAS first:
 
 ```bash
-# Nextcloud container writes as www-data (UID 33)
-sudo chown -R 33:33 /mnt/nas/homelab/cloudnext
+ssh admin@nas.in.alybadawy.com
+id homelab
+# Example: uid=1026(homelab) gid=100(users) ...
+```
+
+Then set ownership using those values (replace `<UID>` and `<GID>`):
+
+```bash
+# Nextcloud and Immich both run as the homelab NAS user
+sudo chown -R <UID>:<GID> /mnt/nas/homelab/cloudnext
 sudo chmod -R 755 /mnt/nas/homelab/cloudnext
 
-# Immich container writes as UID 1000 (node user)
-sudo chown -R 1000:1000 /mnt/nas/homelab/immich
+sudo chown -R <UID>:<GID> /mnt/nas/homelab/immich
 sudo chmod -R 755 /mnt/nas/homelab/immich
 
-# Media — owned by current user for now, revisit when media server is added
+# Media — owned by current user for now, revisit when a media server is added
 sudo chown -R $USER:$USER /mnt/nas/homelab/media
 sudo chmod -R 755 /mnt/nas/homelab/media
 ```
@@ -275,7 +282,7 @@ ls -la /mnt/nas/homelab/
 
 ## Part 5 — Monitoring Mounts
 
-Add these checks to your routine health checks (or Netdata alerts):
+Add these checks to your routine health checks:
 
 ```bash
 # Check if the NAS mount is active
@@ -334,9 +341,9 @@ sudo apt install -y nfs-common
 
 Symptom: `Permission denied` when writing to `/mnt/nas/homelab/cloudnext` or `/mnt/nas/homelab/immich`.
 
-Cause: NAS file ownership doesn't match the expected UID.
+Cause: NAS directory ownership doesn't match the `homelab` NAS user's UID/GID, or the container's `PUID`/`PGID` env vars don't match.
 
-Fix: Re-run the ownership commands from Part 3.
+Fix: Re-run the ownership commands from Part 3 with the correct UID/GID from `id homelab` on the NAS, and confirm the service stack's `HOMELAB_UID`/`HOMELAB_GID` env vars in Portainer match.
 
 ---
 

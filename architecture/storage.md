@@ -4,15 +4,15 @@
 
 Storage is divided into two tiers based on access pattern and data class:
 
-| Tier | Device | Used For | Mount |
-|------|--------|----------|-------|
-| **Hot** | Homelab SSD (256 GB) | OS, Docker images, databases, app state | `/` (local) |
-| **Cold/Bulk** | NAS (172.20.20.10) | User files, photo library, media | `/mnt/nas/*` (NFS) |
+| Tier          | Device               | Used For                                | Mount              |
+| ------------- | -------------------- | --------------------------------------- | ------------------ |
+| **Hot**       | Homelab SSD (256 GB) | OS, Docker images, databases, app state | `/` (local)        |
+| **Cold/Bulk** | NAS (172.20.20.10)   | User files, photo library, media        | `/mnt/nas/*` (NFS) |
 
 The homelab SSD is intentionally kept free of user data. Everything a user creates or uploads lives on the NAS. This means:
 
 - The homelab can be fully wiped and rebuilt without losing a single file
-- NAS hardware can be swapped (UGreen → UniFi UNAS 4) by updating the fstab entry and remounting — no Docker config changes needed
+- NAS hardware can be swapped by updating the fstab entry and remounting — no Docker config changes needed
 - Backups are simpler: back up the NAS, not the homelab
 
 ---
@@ -30,6 +30,7 @@ NAS (172.20.20.10)
 │
 ├── [Personal: Aly]       ← SMB only (independent of homelab services)
 ├── [Personal: User 2]    ← SMB only
+├── [Personal: User 3]    ← SMB only
 └── [Shared folder]       ← SMB shared between users
 ```
 
@@ -48,33 +49,35 @@ This is mounted on the homelab at:
 
 ### Nextcloud (`cloud.in.alybadawy.com`)
 
-| Data Type | Location | Notes |
-|-----------|----------|-------|
-| User files | `/mnt/nas/homelab/cloudnext/` (NAS) | All documents, photos synced by users |
-| App config & PHP state | Docker volume `nextcloud_config` (SSD) | Themes, installed apps, settings |
-| Database | PostgreSQL on SSD | Metadata, shares, users |
-| Session cache | Redis on SSD | Ephemeral, rebuilt on restart |
+| Data Type              | Location                               | Notes                                 |
+| ---------------------- | -------------------------------------- | ------------------------------------- |
+| User files             | `/mnt/nas/homelab/cloudnext/` (NAS)    | All documents, photos synced by users |
+| App config & PHP state | Docker volume `nextcloud_config` (SSD) | Themes, installed apps, settings      |
+| Database               | PostgreSQL on SSD                      | Metadata, shares, users               |
+| Session cache          | Redis on SSD                           | Ephemeral, rebuilt on restart         |
 
 Docker bind mount:
+
 ```yaml
 volumes:
-  - /mnt/nas/homelab/cloudnext:/var/www/html/data   # NAS
-  - nextcloud_config:/var/www/html              # SSD (config/code)
+  - /mnt/nas/homelab/cloudnext:/var/www/html/data # NAS
+  - nextcloud_config:/var/www/html # SSD (config/code)
 ```
 
 ### Immich (`photos.in.alybadawy.com`)
 
-| Data Type | Location | Notes |
-|-----------|----------|-------|
-| Original photos/videos | `/mnt/nas/homelab/immich/library/` (NAS) | Source files, never modified by Immich |
-| Thumbnails & transcodes | `/mnt/nas/homelab/immich/thumbs/` (NAS) | Regeneratable, but large — keep on NAS |
-| ML model cache | Docker volume `immich_model_cache` (SSD) | CLIP, face recognition models (~2–4 GB) |
-| Database | Immich PostgreSQL (SSD) | Metadata, face tags, albums |
+| Data Type               | Location                                 | Notes                                   |
+| ----------------------- | ---------------------------------------- | --------------------------------------- |
+| Original photos/videos  | `/mnt/nas/homelab/immich/library/` (NAS) | Source files, never modified by Immich  |
+| Thumbnails & transcodes | `/mnt/nas/homelab/immich/thumbs/` (NAS)  | Regeneratable, but large — keep on NAS  |
+| ML model cache          | Docker volume `immich_model_cache` (SSD) | CLIP, face recognition models (~2–4 GB) |
+| Database                | Immich PostgreSQL (SSD)                  | Metadata, face tags, albums             |
 
 Docker bind mount:
+
 ```yaml
 volumes:
-  - /mnt/nas/homelab/immich:/usr/src/app/upload  # NAS (library + thumbs)
+  - /mnt/nas/homelab/immich:/usr/src/app/upload # NAS (library + thumbs)
 ```
 
 > Keeping thumbnails on the NAS avoids regenerating them after a rebuild. Regeneration can take hours for large libraries.
@@ -85,13 +88,13 @@ volumes:
 
 ### Why NFS over SMB
 
-| Criterion | NFS | SMB |
-|-----------|-----|-----|
-| Linux Docker container compatibility | Native | Requires extra packages |
-| Unix file permissions (UID/GID) | First-class | Mapped (lossy) |
-| Performance on LAN | Slightly faster | Slightly slower |
-| Protocol overhead | Lower | Higher |
-| Best suited for | Linux-to-Linux | Windows clients |
+| Criterion                            | NFS             | SMB                     |
+| ------------------------------------ | --------------- | ----------------------- |
+| Linux Docker container compatibility | Native          | Requires extra packages |
+| Unix file permissions (UID/GID)      | First-class     | Mapped (lossy)          |
+| Performance on LAN                   | Slightly faster | Slightly slower         |
+| Protocol overhead                    | Lower           | Higher                  |
+| Best suited for                      | Linux-to-Linux  | Windows clients         |
 
 NFS is the right choice for Linux containers talking to a NAS on the same VLAN.
 
@@ -113,6 +116,7 @@ This simplification reduces complexity: one NFS mount, one network operation, on
 ### NFS Version
 
 Use **NFSv4** (`nfs4` in fstab). It offers:
+
 - Stateful connections (better error handling)
 - Better security (no need to expose `rpcbind` on the NAS)
 - Single TCP port (2049) — simpler firewall rules
@@ -132,6 +136,7 @@ The NAS storage is split into two completely separate access patterns:
 - **Human access:** Users access their files through the Nextcloud and Immich web apps, never by browsing the NAS directly
 
 Example:
+
 ```
 User uploads a photo via Immich web app
   → Immich container writes to /mnt/nas/homelab/immich/
@@ -147,6 +152,7 @@ User uploads a photo via Immich web app
 - **Isolation:** Independent of homelab services — if Nextcloud or Immich is down, personal SMB shares remain accessible
 
 Example:
+
 ```
 Aly accesses [Personal: Aly] share via SMB
   → Browse files as if they were on a network drive
@@ -154,6 +160,7 @@ Aly accesses [Personal: Aly] share via SMB
 ```
 
 This separation ensures:
+
 - Service failures don't block user access to personal files
 - No confusion between app-managed data and user-managed data
 - NFS (Linux-optimal) for services, SMB (user-friendly) for personal access
@@ -205,41 +212,48 @@ docker restart nextcloud immich-server
 
 ### Mount Options Explained
 
-| Option | Effect | Why Used |
-|--------|--------|----------|
-| `nfs4` | Use NFSv4 protocol | Better performance and security |
-| `_netdev` | Mark as network device | Tells systemd to wait for network before mounting |
-| `nofail` | Don't fail boot if mount unavailable | Homelab continues booting if NAS is down |
-| `x-systemd.automount` | Lazy mount — only connect on first access | Docker starts immediately; no boot hang |
-| `x-systemd.mount-timeout=30` | Give up mounting after 30 seconds | Prevents indefinite hang if NAS unreachable |
-| `soft` | NFS ops return error on timeout (don't block forever) | Containers get I/O errors, not infinite hangs |
-| `timeo=100` | 10-second NFS operation timeout (units: 0.1s) | Quick failure detection |
-| `retrans=3` | Retry failed NFS ops 3 times before giving up | Tolerates brief NAS hiccups |
-| `rsize=131072,wsize=131072` | 128 KB read/write block size | Optimized for 2.5 GbE throughput |
-| `noatime` | Skip updating file access timestamps | Reduces write amplification on NAS drives |
+| Option                       | Effect                                                | Why Used                                          |
+| ---------------------------- | ----------------------------------------------------- | ------------------------------------------------- |
+| `nfs4`                       | Use NFSv4 protocol                                    | Better performance and security                   |
+| `_netdev`                    | Mark as network device                                | Tells systemd to wait for network before mounting |
+| `nofail`                     | Don't fail boot if mount unavailable                  | Homelab continues booting if NAS is down          |
+| `x-systemd.automount`        | Lazy mount — only connect on first access             | Docker starts immediately; no boot hang           |
+| `x-systemd.mount-timeout=30` | Give up mounting after 30 seconds                     | Prevents indefinite hang if NAS unreachable       |
+| `soft`                       | NFS ops return error on timeout (don't block forever) | Containers get I/O errors, not infinite hangs     |
+| `timeo=100`                  | 10-second NFS operation timeout (units: 0.1s)         | Quick failure detection                           |
+| `retrans=3`                  | Retry failed NFS ops 3 times before giving up         | Tolerates brief NAS hiccups                       |
+| `rsize=131072,wsize=131072`  | 128 KB read/write block size                          | Optimized for 2.5 GbE throughput                  |
+| `noatime`                    | Skip updating file access timestamps                  | Reduces write amplification on NAS drives         |
 
 ---
 
 ## File Ownership & Permissions
 
-Docker containers access NFS shares as specific Unix UIDs. The NAS must allow those UIDs to write.
+All Docker containers that write to the NAS run as the `homelab` user — a dedicated local user created on the UniFi NAS specifically for this purpose. Using a single shared user for all services simplifies NAS permissions: one user, one set of directory ownership, no per-service UID juggling.
 
-| Service | Container UID | NAS Directory | Required Permission |
-|---------|--------------|---------------|---------------------|
-| Nextcloud | `www-data` (UID 33) | `/homelab/cloudnext` | UID 33 owns the directory, `rwx` |
-| Immich | `node` (UID 1000) | `/homelab/immich` | UID 1000 owns the directory, `rwx` |
+**Setup:** Create the `homelab` user on the UniFi NAS via its admin UI, then look up its assigned UID and GID:
 
-On the NAS, before first use:
 ```bash
-# Run on the NAS (via SSH or NAS terminal)
-chown -R 33:33 /homelab/cloudnext        # www-data for Nextcloud
-chown -R 1000:1000 /homelab/immich   # node for Immich
-chmod -R 755 /homelab/cloudnext /homelab/immich
+ssh admin@nas.in.alybadawy.com
+id homelab
+# Example output: uid=1026(homelab) gid=100(users) ...
 ```
 
-Alternatively, configure the NAS NFS export with `all_squash,anonuid=1000,anongid=1000` and run both containers as UID 1000 — but this requires overriding the Nextcloud container's UID, which adds complexity.
+Use those values for `PUID`/`PGID` in any container that writes to the NAS, and for the NAS directory ownership:
 
-> **Simplest homelab option:** Configure the NAS `/homelab` export with `no_root_squash` (access is restricted to `172.20.20.5` anyway) and let the containers handle their own permission needs. Document this as a deliberate trade-off on a private, VLAN-isolated network.
+| Service   | Runs as        | NAS Directory        | Required Permission       |
+| --------- | -------------- | -------------------- | ------------------------- |
+| Nextcloud | `homelab` user | `/homelab/cloudnext` | owned by `homelab`, `rwx` |
+| Immich    | `homelab` user | `/homelab/immich`    | owned by `homelab`, `rwx` |
+
+On the NAS, before first use (substitute the actual UID/GID from `id homelab`):
+
+```bash
+# Run on the NAS via SSH — replace <UID> and <GID> with values from `id homelab`
+chown -R <UID>:<GID> /homelab/cloudnext
+chown -R <UID>:<GID> /homelab/immich
+chmod -R 755 /homelab/cloudnext /homelab/immich
+```
 
 ---
 
@@ -247,32 +261,15 @@ Alternatively, configure the NAS NFS export with `all_squash,anonuid=1000,anongi
 
 With NAS handling all user data, the local SSD footprint is predictable:
 
-| Category | Estimated Size |
-|----------|---------------|
-| Ubuntu Server | ~5 GB |
-| Docker images (all services) | ~15–25 GB |
-| Docker volumes (databases, app state) | ~10–15 GB |
-| Immich ML model cache | ~3–5 GB |
-| Swap file | 8 GB |
-| Logs + misc | ~2 GB |
-| **Total used** | **~43–60 GB** |
-| **Remaining headroom** | **~196–213 GB** |
+| Category                              | Estimated Size  |
+| ------------------------------------- | --------------- |
+| Ubuntu Server                         | ~5 GB           |
+| Docker images (all services)          | ~15–25 GB       |
+| Docker volumes (databases, app state) | ~10–15 GB       |
+| Immich ML model cache                 | ~3–5 GB         |
+| Swap file                             | 8 GB            |
+| Logs + misc                           | ~2 GB           |
+| **Total used**                        | **~43–60 GB**   |
+| **Remaining headroom**                | **~196–213 GB** |
 
 The SSD will not be a bottleneck. All growth goes to the NAS.
-
----
-
-## NAS Migration Path (UGreen → UniFi UNAS 4)
-
-When replacing the NAS hardware, no Docker or application configuration changes are needed if the same IP (`172.20.20.10`) and export path (`/homelab`) are preserved.
-
-Migration procedure:
-```
-1. Set up UniFi UNAS 4 with the same static IP (172.20.20.10)
-2. Create the same NFS export (/homelab) with subfolders (cloud/, immich/, media/)
-3. rsync data from old NAS to new NAS (see rebuild/03-nas-mounting.md)
-4. Update /etc/fstab on homelab only if paths changed
-5. Run: sudo umount /mnt/nas/homelab && sudo mount -a
-6. Verify: ls /mnt/nas/homelab
-7. Decommission old NAS
-```

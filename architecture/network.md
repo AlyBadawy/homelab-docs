@@ -18,7 +18,7 @@
               │       8-Port Switch (+1 uplink)                                   │
               └──┬──────┬─────────────┬────────────┬────────────┬───────────┬─────┘
                  │      │             │            │            │           │
-          VLAN 10│    VLAN 30      VLAN 20     VLAN 20       VLAN 40      VLAN 41
+             VLAN 10  VLAN 30     VLAN 20     VLAN 20       VLAN 40      VLAN 41
                  │      │             │            │            │           │
          Personal PC  Work PC     Homelab         NAS       AREDN WAN     AREDN LAN
                                 172.20.20.5 172.20.20.10   172.20.40.2   10.6.229.9
