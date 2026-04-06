@@ -8,7 +8,7 @@
                     └──────┬──────┘
                            │ WAN
                     ┌──────┴────────────────────────────────────────┐
-                    │          Unifi Dream Router 7 (UDR7)           │
+                    │          Unifi Dream Router 7 (UDR7)          │
                     │  Gateway / Router / Firewall / VPN / DNS | AP │
                     └──────┬────────────────────────────────────────┘
                            |
