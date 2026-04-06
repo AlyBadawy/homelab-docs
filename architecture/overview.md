@@ -4,13 +4,17 @@
 
 - **Hardware**: Beelink Mini S12 (Intel N95, 8GB DDR4, 256GB SSD, 2.5 GbE, Wi-Fi 7)
 - **OS**: Ubuntu Server 24.04 LTS
-- **Identity**: Samba 4 Active Directory DC (bare-metal, provisioned before Docker)
 - **Container Runtime**: Docker (all application services containerized)
-- **NAS**: UGreen NAS (upgrading to UniFi UNAS 4) for bulk storage
-- **AREDN Node**: Mikrotik hAC 2 Lite running WireGuard mesh tunnel (VLAN 40/41)
-- **Domain**: alybadawy.com (DNS via Vercel, internal services via *.in.alybadawy.com)
-- **AD Realm**: `ID.IN.ALYBADAWY.COM` (Samba handles DNS for the `id.in.alybadawy.com` zone)
+- **NAS**: UniFi NAS server — bulk storage for persistent data
+- **AREDN Node**: Mikrotik hAC 2 Lite (VLAN 40/41) — see AREDN documentation folder
+- **Domain**: alybadawy.com (DNS via Vercel, internal services via `*.in.alybadawy.com`)
 - **Access**: LAN + VPN only (no public internet exposure)
+
+### Identity
+
+- **Provider**: Samba 4 Active Directory DC — bare-metal, provisioned before Docker
+- **AD Realm**: `ID.IN.ALYBADAWY.COM`
+- **DNS**: Samba handles the `id.in.alybadawy.com` zone; forwards other queries to UDR7
 
 ---
 
@@ -18,22 +22,23 @@
 
 ### Core Architecture Rules
 
-1. **Everything in Docker**
-   - No bare-metal service installations on the host
-   - Portainer for container orchestration and management
-   - Facilitates easy updates, backups, and isolation
+1. **Everything in Docker — with two bare-metal exceptions**
+   - All application services run in Docker containers managed via Portainer
+   - **Samba 4 AD DC** runs bare-metal: Kerberos and AD-integrated DNS require direct OS-level integration that Docker cannot reliably provide (see ADR-006)
+   - **acme.sh** runs bare-metal: wildcard cert renewal via cron requires host-level scheduling and direct file access to `/opt/certs/` (see ADR-006)
+   - Everything else is containerized for easy updates, isolation, and portability
 
 2. **Single Entry Point: Nginx Proxy Manager**
    - All web UI traffic flows through NPM
-   - No direct service port exposure (except NPM itself and Netdata)
+   - No direct service port exposure
    - TLS termination at NPM layer
    - Centralized reverse proxy with web UI for easy management
 
 3. **Unified TLS with Wildcard Certificates**
    - Single wildcard cert: `*.in.alybadawy.com`
    - Provisioned via acme.sh using Vercel DNS API
-   - Covers all subdomains with one certificate (photos.in.alybadawy.com, cloud.in.alybadawy.com, etc.)
-   - Auto-renewal built into Docker stack
+   - Covers all subdomains with one certificate
+   - Auto-renewal via acme.sh cron job on the host
 
 4. **Centralized Identity via Active Directory**
    - Samba 4 AD DC is the single identity provider — provisioned bare-metal before Docker
@@ -45,6 +50,7 @@
    - Large files (photos, videos, documents) stored on NAS via NFS
    - Homelab SSD reserved for OS, containers, and databases
    - Reduces SSD wear, simplifies backups, enables future hardware upgrades
+   - The homelab server itself is also backed up to the NAS via a scheduled cron job — see the `backup-and-restore` guides for details
 
 6. **No Internet Exposure**
    - Zero ports forwarded from internet to homelab
@@ -113,7 +119,7 @@
 - Large persistent data stored on NAS
 
 **Layer 4: Data Persistence**
-- PostgreSQL: global relational database (shared by identity and app services)
+- PostgreSQL: global relational database (shared by app services)
 - Redis: cache and session store
 - NAS (NFS mount): user files, media library, backups
 
@@ -125,7 +131,7 @@
 
 1. **DNS Resolution**
    - User browses to `cloud.in.alybadawy.com`
-   - UDR7's internal DNS resolves to homelab IP (e.g., 172.20.20.5)
+   - UDR7's internal DNS resolves to homelab IP (172.20.20.5)
 
 2. **TLS Handshake**
    - Client connects to NPM on port 443
@@ -134,21 +140,28 @@
 
 3. **Request Routing**
    - NPM examines Host header, looks up routing rule for `nextcloud`
-   - NPM proxies request to Nextcloud container (e.g., http://nextcloud:80)
+   - NPM proxies request to Nextcloud container
 
 4. **Authentication Check**
    - Nextcloud checks the user's session cookie against its own local user database
    - If no session, Nextcloud presents its own login page
 
 5. **Data Operations**
-   - If request accesses user files, Nextcloud reads from NAS (NFS mount at /mnt/nfs/nextcloud)
+   - User files read from NAS (NFS mount)
    - Session data cached in Redis
    - User metadata queried from PostgreSQL
 
 6. **Response**
    - Nextcloud renders response
    - NPM sends back through encrypted TLS tunnel
-   - Browser displays content
+
+---
+
+## AREDN Integration
+
+The UDR7 is configured with a DNS forward zone for `*.local.mesh`, directing all queries for that domain to the AREDN node on the Aredn-Lan network (VLAN 41). This allows homelab clients to resolve AREDN mesh services by their `.local.mesh` hostnames without any manual configuration.
+
+A dedicated documentation folder covers the full AREDN integration — how it fits into the network, what services run on the mesh, and how they interact with homelab services.
 
 ---
 
@@ -156,22 +169,21 @@
 
 ### Per-Service Memory Consumption (Peak)
 
-| Component | Estimated RAM | Notes |
-|-----------|---------------|-------|
-| Ubuntu base system | 300 MB | Kernel + essential daemons |
-| Samba 4 AD DC | 200–350 MB | Bare-metal; runs samba-ad-dc service |
-| Docker daemon | 100 MB | Container runtime overhead |
-| Dashboard (Rails) | 100 MB | Custom homelab dashboard |
-| Portainer | 50 MB | Container management UI |
-| Netdata | 150 MB | Metrics collection & dashboard |
-| Nginx Proxy Manager | 50 MB | Reverse proxy & routing |
-| PostgreSQL (global) | 150 MB | Runs with shared_buffers=256MB |
-| Redis | 50 MB | Session & cache store |
-| Nextcloud | 300 MB | PHP-FPM container |
-| Immich (server) | 400 MB | API server |
-| Immich (ML service) | 800 MB – 1.5 GB | ML model inference (heaviest) |
-| Home Assistant | 400 MB | Automation engine |
-| **Total (peak)** | **~3.1 – 3.9 GB** | Under 8GB RAM + 8GB swap |
+| Component              | Estimated RAM   | Notes                                              |
+| ---------------------- | --------------- | -------------------------------------------------- |
+| Ubuntu base system     | 300 MB          | Kernel + essential daemons                         |
+| Samba 4 AD DC          | 200–350 MB      | Bare-metal; runs samba-ad-dc service               |
+| Docker daemon          | 100 MB          | Container runtime overhead                         |
+| Portainer              | 50 MB           | Container management UI                            |
+| Beszel (hub + agent)   | 50 MB           | Monitoring dashboard + host agent                  |
+| Nginx Proxy Manager    | 50 MB           | Reverse proxy & routing                            |
+| PostgreSQL (global)    | 150 MB          | Runs with shared_buffers=256MB                     |
+| Redis                  | 50 MB           | Session & cache store                              |
+| Nextcloud              | 300 MB          | PHP-FPM container                                  |
+| Immich (server)        | 400 MB          | API server                                         |
+| Immich (ML service)    | 800 MB – 1.5 GB | ML model inference (heaviest service)              |
+| Home Assistant         | 400 MB          | Automation engine                                  |
+| **Total (peak)**       | **~2.9 – 3.7 GB** | Under 8GB RAM + 8GB swap                        |
 
 ### Why This Works
 
@@ -182,7 +194,7 @@
 
 ### Recommendations
 
-- Monitor memory with Netdata; set alerts if usage exceeds 6GB sustained
+- Monitor memory with Beszel; set alerts if usage exceeds 6GB sustained
 - If adding heavy workloads (e.g., Plex transcoding), consider increasing SSD or adding RAM
 - Current setup is sustainable for 1–3 users, typical homelab scale
 

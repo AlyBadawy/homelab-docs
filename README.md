@@ -1,62 +1,17 @@
 # Homelab Documentation
 
 > **Owner:** Aly Badawy \
-> **Domain:** alybadawy.com \
-> **Internal prefix:** `*.in.alybadawy.com` \
 > **Last updated:** 2026-04-06
 
-This repository is the single source of truth for the homelab server — covering every architectural decision made, the final design, and a complete step-by-step rebuild guide. If the server ever needs to be rebuilt from scratch, this document set is sufficient to reproduce the entire setup.
+This is the single source of truth for the homelab server — covering every architectural decision made, the final design, and a complete step-by-step rebuild guide. If the server ever needs to be rebuilt from scratch, this document set is sufficient to reproduce the entire setup.
 
----
-
-## Hardware
-
-| Component   | Spec                                              |
-| ----------- | ------------------------------------------------- |
-| **Host**    | Beelink Mini PC Mini S12                          |
-| **CPU**     | Intel N95 (12th Gen, 4-core, up to 3.4 GHz)       |
-| **RAM**     | 8 GB DDR4                                         |
-| **Storage** | 256 GB SSD (system + Docker)                      |
-| **Network** | 2.5 Gigabit Ethernet (primary), Wi-Fi 7 (backup)  |
-| **NAS**     | UGreen NAS → planned migration to UniFi UNAS 4    |
-| **AREDN**   | Mikrotik hAC 2 Lite running WireGuard mesh tunnel |
-
----
-
-## Network Summary
-
-| Layer                   | Detail                                                                          |
-| ----------------------- | ------------------------------------------------------------------------------- |
-| **Router / Firewall**   | UniFi Dream Router 7 (UDR7) — `172.20.1.1`                                      |
-| **Servers VLAN**        | VLAN 20 — `172.20.20.0/24` — homelab + NAS                                      |
-| **Homelab OS hostname** | `dc.id.in.alybadawy.com` (required by Samba AD DC)                              |
-| **Homelab IP**          | `172.20.20.5` (static, Servers VLAN)                                            |
-| **NAS IP**              | `172.20.20.10` (static, Servers VLAN)                                           |
-| **DNS (internal)**      | UDR7 built-in DNS — forwards `id.in.alybadawy.com` zone to Samba at 172.20.20.5 |
-| **AD Realm**            | `ID.IN.ALYBADAWY.COM` — Samba 4 DC, bare-metal on homelab server                |
-| **VPN**                 | UniFi VPN server on UDR7 (remote access, assigns Personal VLAN IPs)             |
-| **Domain registrar**    | Vercel (alybadawy.com)                                                          |
-| **Public entry point**  | `in.alybadawy.com` → UDR public IP (A record, auto-updated)                     |
-| **Public wildcard**     | `*.in.alybadawy.com` CNAME → `in.alybadawy.com`                                 |
-| **Internal resolution** | `*.in.alybadawy.com` → `172.20.20.5` (homelab)                                  |
-| **Public exposure**     | None — homelab is LAN-only + VPN                                                |
+For hardware specs, network design, and service architecture, see the [Architecture docs](architecture/overview.md).
 
 ---
 
 ## Services
 
-| Service             | Purpose                                                | Subdomain / Access                  |
-| ------------------- | ------------------------------------------------------ | ----------------------------------- |
-| **Samba 4 AD DC**   | Centralized identity — LDAP, Kerberos, DNS for AD zone | _(bare-metal, ports 389/636/88/53)_ |
-| Nginx Proxy Manager | Reverse proxy + SSL termination                        | `proxy.in.alybadawy.com`            |
-| Portainer           | Docker container management                            | `dockers.in.alybadawy.com`          |
-| Beszel              | Host + container monitoring dashboard                  | `monitor.in.alybadawy.com`          |
-| Netdata             | System monitoring (CPU/RAM/disk/network)               | `netdata.in.alybadawy.com`          |
-| Nextcloud           | Self-hosted file sync and productivity                 | `cloud.in.alybadawy.com`            |
-| Immich              | Self-hosted photo management                           | `photos.in.alybadawy.com`           |
-| Home Assistant      | Home automation hub                                    | `ha.in.alybadawy.com`               |
-| PostgreSQL          | Shared relational database                             | _(internal only)_                   |
-| Redis               | Shared cache / queue                                   | _(internal only)_                   |
+See [Services & Docker Networks](architecture/services.md) for the full service inventory, network assignments, and deployment order.
 
 ---
 
@@ -69,6 +24,7 @@ This repository is the single source of truth for the homelab server — coverin
 - [ADR-003 — Authentication Strategy](decisions/ADR-003-authentication-strategy.md)
 - [ADR-004 — Storage Strategy](decisions/ADR-004-storage-strategy.md)
 - [ADR-005 — NAS Folder Layout & Access Strategy](decisions/ADR-005-nas-layout.md)
+- [ADR-006 — Bare-Metal Exceptions (Samba AD & acme.sh)](decisions/ADR-006-bare-metal-exceptions.md)
 
 ### Architecture
 
@@ -99,10 +55,8 @@ This repository is the single source of truth for the homelab server — coverin
 
 ## Key Conventions
 
-- All Docker stacks live under `/opt/stacks/`
-- Each stack has its own `.env` file for secrets (never commit secrets)
 - Docker networks are pre-created externally and shared across stacks
 - All web UIs are accessed exclusively through Nginx Proxy Manager
 - Persistent data that belongs on the NAS is mounted via NFS
-- Samba 4 AD is the centralized identity provider — all services authenticate against it via LDAP/LDAPS or OIDC
-- Samba AD is a bare-metal service (not Docker) and must be provisioned before Docker is installed
+- Samba 4 AD is the centralized identity provider — services authenticate via LDAP/LDAPS or OIDC
+- Samba 4 AD and acme.sh (cert management) run bare-metal; everything else is Docker (see ADR-006)

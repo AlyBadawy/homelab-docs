@@ -4,11 +4,9 @@ Self-hosted photo and video library with AI-powered features. Users are managed 
 
 ## Prerequisites
 
-- Guide 07 complete — Redis running
+- Guide 07 complete — PostgreSQL and Redis running
 - Docker networks: `proxy` and `databases` present
 - NAS mounted at `/mnt/nas/homelab/immich`
-
-> Immich uses its **own dedicated PostgreSQL** instance (with the pgvector extension for AI features). It does not share the global PostgreSQL from Guide 07.
 
 > **How to deploy a stack in Portainer:** Go to **Stacks → + Add stack**, enter the stack name shown, paste the compose content into the **Web editor**, add environment variables in the **Environment variables** section below the editor, then click **Deploy the stack**.
 
@@ -28,13 +26,11 @@ services:
       - /mnt/nas/homelab/immich:/usr/src/app/upload
       - /etc/localtime:/etc/localtime:ro
     environment:
-      - DB_HOSTNAME=immich-postgres
-      - DB_USERNAME=immich
-      - DB_PASSWORD=${IMMICH_DB_PASSWORD}
+      - DB_HOSTNAME=postgres
+      - DB_USERNAME=postgres
+      - DB_PASSWORD=${POSTGRES_PASSWORD}
       - DB_DATABASE_NAME=immich
       - REDIS_HOSTNAME=redis
-    depends_on:
-      - immich-postgres
     networks:
       - proxy
       - databases
@@ -45,28 +41,10 @@ services:
     restart: unless-stopped
     volumes:
       - immich_model_cache:/cache
-    environment:
-      - DB_HOSTNAME=immich-postgres
-      - DB_USERNAME=immich
-      - DB_PASSWORD=${IMMICH_DB_PASSWORD}
-      - DB_DATABASE_NAME=immich
     mem_limit: 2g
-
-  immich-postgres:
-    image: ghcr.io/immich-app/postgres:14-vectorchord0.3.0-pgvectors0.2.0
-    container_name: immich-postgres
-    restart: unless-stopped
-    environment:
-      - POSTGRES_USER=immich
-      - POSTGRES_PASSWORD=${IMMICH_DB_PASSWORD}
-      - POSTGRES_DB=immich
-      - POSTGRES_INITDB_ARGS=--encoding=UTF8
-    volumes:
-      - immich_postgres_data:/var/lib/postgresql/data
 
 volumes:
   immich_model_cache:
-  immich_postgres_data:
 
 networks:
   proxy:
@@ -77,11 +55,13 @@ networks:
 
 In the **Environment variables** section, add:
 
-| Variable             | Value                      |
-| -------------------- | -------------------------- |
-| `IMMICH_DB_PASSWORD` | _(strong unique password)_ |
+| Variable            | Value                                                                              |
+| ------------------- | ---------------------------------------------------------------------------------- |
+| `POSTGRES_PASSWORD` | _(the global `postgres` superuser password set in Guide 07)_                       |
 
-Click **Deploy the stack**. Wait 2–3 minutes for the database to initialize. Check **Containers → immich-server → Logs**. Watch for: `Immich Server is listening`.
+Immich will create the `immich` database in the global PostgreSQL instance on first run.
+
+Click **Deploy the stack**. Wait 1–2 minutes for initialization. Check **Containers → immich-server → Logs**. Watch for: `Immich Server is listening`.
 
 ---
 
@@ -123,7 +103,7 @@ Additional users can be added later under **Administration → Users**.
 
 ## Verification Checklist
 
-- [ ] All Immich containers running: `docker ps | grep immich` — all show `Up`
+- [ ] Immich containers running: `docker ps | grep immich` — both `immich-server` and `immich-machine-learning` show `Up`
 - [ ] `https://photos.in.alybadawy.com` loads, SSL valid
 - [ ] Admin login works
 - [ ] Upload a photo → confirm it lands at `/mnt/nas/homelab/immich`
@@ -139,7 +119,7 @@ Additional users can be added later under **Administration → Users**.
 docker logs immich-server | tail -30
 ```
 
-Usually means `immich-postgres` isn't ready yet. Wait 30 seconds and check again — `depends_on` doesn't wait for the DB to be fully ready, only for the container to start.
+Usually a database connection error — confirm the global `postgres` container is running and healthy (`docker ps | grep postgres`), and that `POSTGRES_PASSWORD` matches the value set in Guide 07.
 
 **Photos not appearing after upload:**
 
