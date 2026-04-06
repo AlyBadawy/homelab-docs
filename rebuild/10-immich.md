@@ -1,14 +1,14 @@
-# 07 — Immich
+# 10 — Immich
 
 Self-hosted photo and video library with AI-powered features. Users are managed with Immich's built-in accounts.
 
 ## Prerequisites
 
-- Guide 05 complete — core infrastructure running (NPM, Redis)
-- Docker networks: `proxy` and `apps` present
+- Guide 07 complete — Redis running
+- Docker networks: `proxy` and `databases` present
 - NAS mounted at `/mnt/nas/homelab/immich`
 
-> Immich uses its **own dedicated PostgreSQL** instance (with the pgvector extension for AI features). It does not share the global PostgreSQL from Guide 05.
+> Immich uses its **own dedicated PostgreSQL** instance (with the pgvector extension for AI features). It does not share the global PostgreSQL from Guide 07.
 
 > **How to deploy a stack in Portainer:** Go to **Stacks → + Add stack**, enter the stack name shown, paste the compose content into the **Web editor**, add environment variables in the **Environment variables** section below the editor, then click **Deploy the stack**.
 
@@ -37,7 +37,7 @@ services:
       - immich-postgres
     networks:
       - proxy
-      - apps
+      - databases
 
   immich-machine-learning:
     image: ghcr.io/immich-app/immich-machine-learning:release
@@ -51,8 +51,6 @@ services:
       - DB_PASSWORD=${IMMICH_DB_PASSWORD}
       - DB_DATABASE_NAME=immich
     mem_limit: 2g
-    networks:
-      - apps
 
   immich-postgres:
     image: ghcr.io/immich-app/postgres:14-vectorchord0.3.0-pgvectors0.2.0
@@ -65,8 +63,6 @@ services:
       - POSTGRES_INITDB_ARGS=--encoding=UTF8
     volumes:
       - immich_postgres_data:/var/lib/postgresql/data
-    networks:
-      - apps
 
 volumes:
   immich_model_cache:
@@ -75,7 +71,7 @@ volumes:
 networks:
   proxy:
     external: true
-  apps:
+  databases:
     external: true
 ```
 

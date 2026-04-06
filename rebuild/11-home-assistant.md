@@ -1,10 +1,10 @@
-# 08 — Home Assistant
+# 11 — Home Assistant
 
 Smart home automation hub with access through NPM. Uses host networking for device discovery. Users are managed with Home Assistant's built-in local accounts.
 
 ## Prerequisites
 
-- Guide 05 complete — NPM running with wildcard cert
+- Guide 06 complete — NPM running with wildcard cert
 - Docker network: `proxy` present (not used directly — HA runs on host network, but NPM proxies via `127.0.0.1`)
 
 > **Why host network mode?** Home Assistant needs direct access to mDNS and other network protocols to auto-discover smart home devices. Docker bridge networking breaks these features. Because of this, HA is accessed via `127.0.0.1:8123` from NPM, not via a Docker network hostname.

@@ -1,7 +1,5 @@
 # Homelab Documentation
 
-> [!INFO]
->
 > **Owner:** Aly Badawy \
 > **Domain:** alybadawy.com \
 > **Internal prefix:** `*.in.alybadawy.com` \
@@ -27,38 +25,38 @@ This repository is the single source of truth for the homelab server — coverin
 
 ## Network Summary
 
-| Layer                   | Detail                                                                        |
-| ----------------------- | ----------------------------------------------------------------------------- |
-| **Router / Firewall**   | UniFi Dream Router 7 (UDR7) — `172.20.1.1`                                    |
-| **Servers VLAN**        | VLAN 20 — `172.20.20.0/24` — homelab + NAS                                    |
-| **Homelab OS hostname** | `dc.id.in.alybadawy.com` (required by Samba AD DC)                            |
-| **Homelab IP**          | `172.20.20.5` (static, Servers VLAN)                                          |
-| **NAS IP**              | `172.20.20.10` (static, Servers VLAN)                                         |
+| Layer                   | Detail                                                                          |
+| ----------------------- | ------------------------------------------------------------------------------- |
+| **Router / Firewall**   | UniFi Dream Router 7 (UDR7) — `172.20.1.1`                                      |
+| **Servers VLAN**        | VLAN 20 — `172.20.20.0/24` — homelab + NAS                                      |
+| **Homelab OS hostname** | `dc.id.in.alybadawy.com` (required by Samba AD DC)                              |
+| **Homelab IP**          | `172.20.20.5` (static, Servers VLAN)                                            |
+| **NAS IP**              | `172.20.20.10` (static, Servers VLAN)                                           |
 | **DNS (internal)**      | UDR7 built-in DNS — forwards `id.in.alybadawy.com` zone to Samba at 172.20.20.5 |
-| **AD Realm**            | `ID.IN.ALYBADAWY.COM` — Samba 4 DC, bare-metal on homelab server              |
-| **VPN**                 | UniFi VPN server on UDR7 (remote access, assigns Personal VLAN IPs)           |
-| **Domain registrar**    | Vercel (alybadawy.com)                                                        |
-| **Public entry point**  | `in.alybadawy.com` → UDR public IP (A record, auto-updated)                   |
-| **Public wildcard**     | `*.in.alybadawy.com` CNAME → `in.alybadawy.com`                               |
-| **Internal resolution** | `*.in.alybadawy.com` → `172.20.20.5` (homelab)                                |
-| **Public exposure**     | None — homelab is LAN-only + VPN                                              |
+| **AD Realm**            | `ID.IN.ALYBADAWY.COM` — Samba 4 DC, bare-metal on homelab server                |
+| **VPN**                 | UniFi VPN server on UDR7 (remote access, assigns Personal VLAN IPs)             |
+| **Domain registrar**    | Vercel (alybadawy.com)                                                          |
+| **Public entry point**  | `in.alybadawy.com` → UDR public IP (A record, auto-updated)                     |
+| **Public wildcard**     | `*.in.alybadawy.com` CNAME → `in.alybadawy.com`                                 |
+| **Internal resolution** | `*.in.alybadawy.com` → `172.20.20.5` (homelab)                                  |
+| **Public exposure**     | None — homelab is LAN-only + VPN                                                |
 
 ---
 
 ## Services
 
-| Service             | Purpose                                                        | Subdomain / Access                  |
-| ------------------- | -------------------------------------------------------------- | ----------------------------------- |
-| **Samba 4 AD DC**   | Centralized identity — LDAP, Kerberos, DNS for AD zone         | _(bare-metal, ports 389/636/88/53)_ |
-| Nginx Proxy Manager | Reverse proxy + SSL termination                                | `proxy.in.alybadawy.com`            |
-| Portainer           | Docker container management                                    | `dockers.in.alybadawy.com`          |
-| Beszel              | Host + container monitoring dashboard                          | `monitor.in.alybadawy.com`          |
-| Netdata             | System monitoring (CPU/RAM/disk/network)                       | `netdata.in.alybadawy.com`          |
-| Nextcloud           | Self-hosted file sync and productivity                         | `cloud.in.alybadawy.com`            |
-| Immich              | Self-hosted photo management                                   | `photos.in.alybadawy.com`           |
-| Home Assistant      | Home automation hub                                            | `ha.in.alybadawy.com`               |
-| PostgreSQL          | Shared relational database                                     | _(internal only)_                   |
-| Redis               | Shared cache / queue                                           | _(internal only)_                   |
+| Service             | Purpose                                                | Subdomain / Access                  |
+| ------------------- | ------------------------------------------------------ | ----------------------------------- |
+| **Samba 4 AD DC**   | Centralized identity — LDAP, Kerberos, DNS for AD zone | _(bare-metal, ports 389/636/88/53)_ |
+| Nginx Proxy Manager | Reverse proxy + SSL termination                        | `proxy.in.alybadawy.com`            |
+| Portainer           | Docker container management                            | `dockers.in.alybadawy.com`          |
+| Beszel              | Host + container monitoring dashboard                  | `monitor.in.alybadawy.com`          |
+| Netdata             | System monitoring (CPU/RAM/disk/network)               | `netdata.in.alybadawy.com`          |
+| Nextcloud           | Self-hosted file sync and productivity                 | `cloud.in.alybadawy.com`            |
+| Immich              | Self-hosted photo management                           | `photos.in.alybadawy.com`           |
+| Home Assistant      | Home automation hub                                    | `ha.in.alybadawy.com`               |
+| PostgreSQL          | Shared relational database                             | _(internal only)_                   |
+| Redis               | Shared cache / queue                                   | _(internal only)_                   |
 
 ---
 
@@ -90,11 +88,12 @@ This repository is the single source of truth for the homelab server — coverin
 3. [NAS Mounting (NFS — must run before Docker)](rebuild/03-nas-mounting.md)
 4. [Docker + Portainer](rebuild/04-docker-setup.md)
 5. [SSL Certificates (acme.sh + Vercel DNS)](rebuild/05-ssl-certificates.md)
-6. [Core Infrastructure (NPM, Netdata, PostgreSQL, Redis)](rebuild/06-core-infrastructure.md)
-7. [Nextcloud](rebuild/07-nextcloud.md)
-8. [Immich](rebuild/08-immich.md)
-9. [Home Assistant](rebuild/09-home-assistant.md)
-10. [Beszel (Host Monitoring)](rebuild/10-beszel.md)
+6. [Core Infrastructure (Portainer, NPM)](rebuild/06-core-infrastructure.md)
+7. [Databases (PostgreSQL, Redis)](rebuild/07-databases.md)
+8. [Monitoring (Beszel)](rebuild/08-monitoring.md)
+9. [Nextcloud](rebuild/09-nextcloud.md)
+10. [Immich](rebuild/10-immich.md)
+11. [Home Assistant](rebuild/11-home-assistant.md)
 
 ---
 

@@ -1,11 +1,11 @@
-# 06 — Nextcloud
+# 09 — Nextcloud
 
 Personal cloud storage and file sync. Users are managed with Nextcloud's built-in accounts.
 
 ## Prerequisites
 
-- Guide 05 complete — PostgreSQL and Redis running
-- Docker networks: `proxy` and `apps` present
+- Guide 07 complete — PostgreSQL and Redis running
+- Docker networks: `proxy` and `databases` present
 - NAS mounted at `/mnt/nas/homelab/cloudnext`
 
 > **How to deploy a stack in Portainer:** Go to **Stacks → + Add stack**, enter the stack name shown, paste the compose content into the **Web editor**, add environment variables in the **Environment variables** section below the editor, then click **Deploy the stack**.
@@ -55,7 +55,7 @@ services:
       - /mnt/nas/homelab/cloudnext:/data
     networks:
       - proxy
-      - apps
+      - databases
 
 volumes:
   nextcloud_config:
@@ -63,7 +63,7 @@ volumes:
 networks:
   proxy:
     external: true
-  apps:
+  databases:
     external: true
 ```
 
@@ -71,7 +71,7 @@ In the **Environment variables** section, add:
 
 | Variable                   | Value                                                                                 |
 | -------------------------- | ------------------------------------------------------------------------------------- |
-| `POSTGRES_PASSWORD`        | _(the `postgres` superuser password set when deploying the postgres stack in Guide 05)_ |
+| `POSTGRES_PASSWORD`        | _(the `postgres` superuser password set when deploying the postgres stack in Guide 07)_ |
 | `NEXTCLOUD_ADMIN_USER`     | `aly`                                                                                 |
 | `NEXTCLOUD_ADMIN_PASSWORD` | _(strong password)_ |
 

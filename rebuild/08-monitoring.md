@@ -1,4 +1,4 @@
-# 10 — Beszel (Host Monitoring)
+# 08 — Monitoring (Beszel)
 
 Beszel is a lightweight server monitoring dashboard. It uses a **hub + agent** architecture: the hub is the web UI that aggregates metrics; the agent runs on the host and streams data to it. Both are deployed in a single stack.
 
