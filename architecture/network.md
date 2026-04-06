@@ -7,22 +7,21 @@
                     │  ISP Modem  │
                     └──────┬──────┘
                            │ WAN
-                    ┌──────┴──────────────────┐
-                    │          UDR7            │
-                    │  Router / Firewall /     │
-                    │  VPN / DNS / Gateway     │
-                    └──────┬──────────────────-┘
+                    ┌──────┴────────────────────────────────────────┐
+                    │          Unifi Dream Router 7 (UDR7)           │
+                    │  Gateway / Router / Firewall / VPN / DNS | AP │
+                    └──────┬────────────────────────────────────────┘
+                           |
                            │ LAN (trunk — all VLANs)
-              ┌────────────┴──────────────────────┐
-              │       8-Port Switch (+1 uplink)   │
-              └──┬──────┬──────┬──────┬──────┬────┘
-                 │      │      │      │      │
-          VLAN 10│ VLAN 30│ VLAN 20│ VLAN 20│ VLAN 40│ VLAN 41
-                 │      │      │      │      │
-         Personal PC Work PC Homelab  NAS   AREDN    AREDN
-                            172.20. 172.20. WAN port LAN port
-                            20.5    20.10  172.20.   10.6.229.9
-                                           40.2
+                           |
+              ┌────────────┴──────────────────────────────────────────────────────┐
+              │       8-Port Switch (+1 uplink)                                   │
+              └──┬──────┬─────────────┬────────────┬────────────┬───────────┬─────┘
+                 │      │             │            │            │           │
+          VLAN 10│    VLAN 30      VLAN 20     VLAN 20       VLAN 40      VLAN 41
+                 │      │             │            │            │           │
+         Personal PC  Work PC     Homelab         NAS       AREDN WAN     AREDN LAN
+                                172.20.20.5 172.20.20.10   172.20.40.2   10.6.229.9
 ```
 
 > **AREDN-LAN (VLAN 41):** The UDR7 does not run a DHCP server on this VLAN. Instead, it acts as a **DHCP relay** — forwarding DHCP requests to the AREDN node at `10.6.229.9`, which decides the subnet and IP assignments internally. The AREDN node is the authoritative DHCP server and default gateway for the `10.6.229.8/29` segment.
@@ -46,16 +45,18 @@ The home network uses UniFi VLAN segmentation for isolation between device class
 
 ### Key Device Assignments
 
-| Device                   | VLAN           | IP           | Notes                                                                                                                     |
-| ------------------------ | -------------- | ------------ | ------------------------------------------------------------------------------------------------------------------------- |
-| UDR7 (Servers gateway)   | Servers (20)   | 172.20.20.1  | Main DNS server for all VLANs                                                                                             |
-| Homelab server (Beelink) | Servers (20)   | 172.20.20.5  | OS hostname: `dc.id.in.alybadawy.com` (required by Samba AD); also reachable as `lab.in.alybadawy.com` via UDR7 DNS alias |
-| UniFi NAS                | Servers (20)   | 172.20.20.10 | NFS exports for Nextcloud + Immich                                                                                        |
-| AREDN node (WAN port)    | Aredn-Wan (40) | 172.20.40.2  | AREDN mesh WAN uplink                                                                                                     |
-| AREDN node (LAN port)    | Aredn-Lan (41) | 10.6.229.9   | AREDN mesh LAN — also the DHCP server for VLAN 41                                                                         |
+| Device                   | VLAN           | IP           | Notes                                    |
+| ------------------------ | -------------- | ------------ | ---------------------------------------- |
+| UDR7 (Servers gateway)   | Servers (20)   | 172.20.20.1  | Main DNS server for all VLANs            |
+| Homelab server (Beelink) | Servers (20)   | 172.20.20.5  | OS hostname: `dc.id.in.alybadawy.com`    |
+| UniFi NAS                | Servers (20)   | 172.20.20.10 | SMB and NFS exports                      |
+| AREDN node (WAN port)    | Aredn-Wan (40) | 172.20.40.2  | AREDN mesh WAN uplink                    |
+| AREDN node (LAN port)    | Aredn-Lan (41) | 10.6.229.9   | AREDN mesh LAN + DHCP server for VLAN 41 |
 
+> [!CAUTION]
 > **Note on hostname:** Samba AD requires the machine's OS hostname to match the DC FQDN (`dc.id.in.alybadawy.com`). All service subdomains (`*.in.alybadawy.com`) continue to work via UDR7 local DNS records pointing to `172.20.20.5`.
 
+> [!TIP]
 > **Why Servers VLAN for both homelab and NAS?** Placing both on the same VLAN means NFS traffic stays entirely within VLAN 20 at LAN speeds, without traversing firewall rules between VLANs. Other devices access services through NPM via inter-VLAN routing controlled by the UDR7 firewall.
 
 ---
@@ -64,16 +65,14 @@ The home network uses UniFi VLAN segmentation for isolation between device class
 
 ### Public DNS (Vercel)
 
-Only `in.alybadawy.com` is exposed publicly. Individual service subdomains are internal-only — they resolve publicly via the wildcard CNAME, but no ports are forwarded, so they are only reachable from LAN or VPN.
+Only `in.alybadawy.com` is exposed publicly. Individual service subdomains are internal-only. There is no DNS record for those as they are only reachable from LAN or VPN.
 
 ```
 in.alybadawy.com          A       → UDR7 public IP (auto-updated by DDNS script)
-*.in.alybadawy.com        CNAME   → in.alybadawy.com
 ```
 
-- The wildcard CNAME exists primarily to allow Let's Encrypt DNS-01 validation for the wildcard cert
 - No public ports are forwarded to the homelab — all services are LAN + VPN only
-- The A record is updated automatically when the UDR7's public IP changes
+- The A record is updated automatically when the Homelab's public IP changes
 
 ### Internal DNS (UniFi UDR7 Built-in DNS)
 
@@ -209,17 +208,17 @@ Application-layer communication — services that need to talk to each other:
 │                                                                  │
 │  ┌──────────────── proxy ──────────────────────────────┐         │
 │  │  [NPM]  [Portainer]  [Beszel Hub]                   │         │
-│  │  [Nextcloud]  [Immich Server]                        │         │
-│  └──────────────────────────┬───────────────────────---┘         │
+│  │  [Nextcloud]  [Immich Server]                       │         │
+│  └──────────────────────────┬──────────────────────────┘         │
 │                             │ (ports 80, 443)                    │
 │  ┌──────── databases ───────┼──────────────────────────┐         │
 │  │  [PostgreSQL]  [Redis]   │                          │         │
 │  │  [Nextcloud]  [Immich Server]  ← also on this net   │         │
-│  └──────────────────────────┼───────────────────────---┘         │
+│  └──────────────────────────┼──────────────────────────┘         │
 │                             │                                    │
 │  ┌──────────── apps ────────┴──────────────────────────┐         │
-│  │  [Nextcloud]  [Immich Server]  [Immich ML]           │         │
-│  └─────────────────────────────────────────────────----┘         │
+│  │  [Nextcloud]  [Immich Server]  [Immich ML]          │         │
+│  └─────────────────────────────────────────────────────┘         │
 │                                                                  │
 │  [Home Assistant] → network_mode: host                           │
 │                                                                  │
