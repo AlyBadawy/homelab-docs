@@ -1,12 +1,11 @@
 # 06 — Core Infrastructure
 
-This guide bootstraps Portainer (the first container), then deploys NPM and the shared database layer through the Portainer UI.
+This guide bootstraps Portainer (the first container), then deploys NPM through the Portainer UI.
 
 **Deployment order in this guide:**
 
 1. **Portainer** — first container; manages all subsequent stacks
 2. **NPM** — reverse proxy; makes all web UIs accessible via subdomain
-3. **PostgreSQL + Redis** — shared database layer for apps
 
 **Prerequisites:**
 
@@ -27,7 +26,7 @@ Create the directory and compose file:
 
 ```bash
 sudo mkdir -p /opt/stacks/portainer
-sudo chown -r $USER:$USER /opt/stacks
+sudo chown -R $USER:$USER /opt/stacks
 
 cat > /opt/stacks/portainer/docker-compose.yml << 'EOF'
 services:
@@ -243,122 +242,12 @@ Portainer is now accessible at `https://dockers.in.alybadawy.com`.
 
 ---
 
-## Section 3: PostgreSQL and Redis
-
-These are the shared database services used by Nextcloud and other apps. They are container-only — no external ports exposed.
-
-Apps connect using the default `postgres` superuser — no init scripts or dedicated per-app users are needed. Each app creates its own database on first run if it doesn't exist.
-
-### 3.1: Deploy PostgreSQL
-
-Stack name: `postgres`
-
-In Portainer, create a new stack named `postgres` with the following compose content:
-
-```yaml
-services:
-  postgres:
-    image: postgres:16
-    container_name: postgres
-    restart: unless-stopped
-    environment:
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
-      POSTGRES_INITDB_ARGS: "-c max_connections=200"
-    volumes:
-      - postgres_data:/var/lib/postgresql/data
-    networks:
-      - identity
-      - apps
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U postgres"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-
-volumes:
-  postgres_data:
-
-networks:
-  identity:
-    external: true
-  apps:
-    external: true
-```
-
-In the **Environment variables** section, add:
-
-| Variable            | Value                                                                     |
-| ------------------- | ------------------------------------------------------------------------- |
-| `POSTGRES_PASSWORD` | _(strong generated password — this is the `postgres` superuser password)_ |
-
-Generate a strong password:
-
-```bash
-openssl rand -base64 32
-```
-
-Save this password in your password manager — apps that use PostgreSQL will reference it.
-
-Click **Deploy the stack**. Check **Containers → postgres → Logs** — wait for the healthcheck to show `healthy`.
-
-### 3.2: Deploy Redis
-
-Stack name: `redis`
-
-In Portainer, create a new stack named `redis` with the following compose content:
-
-```yaml
-services:
-  redis:
-    image: redis:7-alpine
-    container_name: redis
-    restart: unless-stopped
-    command: redis-server --save 60 1 --loglevel warning --appendonly yes
-    volumes:
-      - redis_data:/data
-    networks:
-      - identity
-      - apps
-    healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-
-volumes:
-  redis_data:
-
-networks:
-  identity:
-    external: true
-  apps:
-    external: true
-```
-
-No environment variables needed. Click **Deploy the stack**.
-
-### 3.3: Verify Database Connectivity
-
-```bash
-# PostgreSQL
-docker exec postgres pg_isready -U postgres
-
-# Redis
-docker exec redis redis-cli ping
-```
-
-Expected: `accepting connections` and `PONG`.
-
----
-
 ## Deployment Summary
 
-| Service             | Stack name  | Network        | Access                             |
-| ------------------- | ----------- | -------------- | ---------------------------------- |
-| Portainer           | `portainer` | proxy          | `https://dockers.in.alybadawy.com` |
-| Nginx Proxy Manager | `npm`       | proxy          | `https://proxy.in.alybadawy.com`   |
-| PostgreSQL          | `postgres`  | identity, apps | `postgres:5432` (internal only)    |
-| Redis               | `redis`     | identity, apps | `redis:6379` (internal only)       |
+| Service             | Stack name  | Network | Access                             |
+| ------------------- | ----------- | ------- | ---------------------------------- |
+| Portainer           | `portainer` | proxy   | `https://dockers.in.alybadawy.com` |
+| Nginx Proxy Manager | `npm`       | proxy   | `https://proxy.in.alybadawy.com`   |
 
 ---
 
@@ -376,17 +265,6 @@ Common issues:
 
 - Port 80 or 443 already in use: `lsof -i :80,443`
 - Docker network `proxy` not created: `docker network ls`
-
-### PostgreSQL won't initialize
-
-```bash
-docker logs postgres
-```
-
-Common issues:
-
-- Volume already exists with old data: remove it in Portainer under **Volumes** and redeploy
-- Container exits immediately: check logs for permission errors on the data volume
 
 ### Proxy hosts return 502 Bad Gateway
 

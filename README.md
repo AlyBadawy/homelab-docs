@@ -5,7 +5,7 @@
 > **Owner:** Aly Badawy \
 > **Domain:** alybadawy.com \
 > **Internal prefix:** `*.in.alybadawy.com` \
-> **Last updated:** 2026-04-02
+> **Last updated:** 2026-04-06
 
 This repository is the single source of truth for the homelab server — covering every architectural decision made, the final design, and a complete step-by-step rebuild guide. If the server ever needs to be rebuilt from scratch, this document set is sufficient to reproduce the entire setup.
 
@@ -52,6 +52,7 @@ This repository is the single source of truth for the homelab server — coverin
 | **Samba 4 AD DC**   | Centralized identity — LDAP, Kerberos, DNS for AD zone         | _(bare-metal, ports 389/636/88/53)_ |
 | Nginx Proxy Manager | Reverse proxy + SSL termination                                | `proxy.in.alybadawy.com`            |
 | Portainer           | Docker container management                                    | `dockers.in.alybadawy.com`          |
+| Beszel              | Host + container monitoring dashboard                          | `monitor.in.alybadawy.com`          |
 | Netdata             | System monitoring (CPU/RAM/disk/network)                       | `netdata.in.alybadawy.com`          |
 | Nextcloud           | Self-hosted file sync and productivity                         | `cloud.in.alybadawy.com`            |
 | Immich              | Self-hosted photo management                                   | `photos.in.alybadawy.com`           |
@@ -93,6 +94,7 @@ This repository is the single source of truth for the homelab server — coverin
 7. [Nextcloud](rebuild/07-nextcloud.md)
 8. [Immich](rebuild/08-immich.md)
 9. [Home Assistant](rebuild/09-home-assistant.md)
+10. [Beszel (Host Monitoring)](rebuild/10-beszel.md)
 
 ---
 
