@@ -1,31 +1,62 @@
 # Homelab Network Architecture
 
+## Physical Network Topology
+
+```
+                    ┌─────────────┐
+                    │  ISP Modem  │
+                    └──────┬──────┘
+                           │ WAN
+                    ┌──────┴──────────────────┐
+                    │          UDR7            │
+                    │  Router / Firewall /     │
+                    │  VPN / DNS / Gateway     │
+                    └──────┬──────────────────-┘
+                           │ LAN (trunk — all VLANs)
+              ┌────────────┴──────────────────────┐
+              │       8-Port Switch (+1 uplink)   │
+              └──┬──────┬──────┬──────┬──────┬────┘
+                 │      │      │      │      │
+          VLAN 10│ VLAN 30│ VLAN 20│ VLAN 20│ VLAN 40│ VLAN 41
+                 │      │      │      │      │
+         Personal PC Work PC Homelab  NAS   AREDN    AREDN
+                            172.20. 172.20. WAN port LAN port
+                            20.5    20.10  172.20.   10.6.229.9
+                                           40.2
+```
+
+> **AREDN-LAN (VLAN 41):** The UDR7 does not run a DHCP server on this VLAN. Instead, it acts as a **DHCP relay** — forwarding DHCP requests to the AREDN node at `10.6.229.9`, which decides the subnet and IP assignments internally. The AREDN node is the authoritative DHCP server and default gateway for the `10.6.229.8/29` segment.
+
+---
+
 ## VLAN Design
 
 The home network uses UniFi VLAN segmentation for isolation between device classes. The homelab server and NAS both reside on the **Servers VLAN**.
 
-| Name        | VLAN ID | Subnet             | Gateway         | Purpose                      |
-| ----------- | ------- | ------------------ | --------------- | ---------------------------- |
-| Default     | 1       | 172.20.1.0/24      | 172.20.1.1      | Management / primary devices |
-| Personal    | 10      | 172.20.10.0/24     | 172.20.10.1     | Personal computers, phones   |
-| **Servers** | **20**  | **172.20.20.0/24** | **172.20.20.1** | **Homelab server + NAS**     |
-| Work        | 30      | 172.20.30.0/24     | 172.20.30.1     | Work devices (isolated)      |
-| Aredn-Wan   | 40      | 172.20.40.0/24     | 172.20.40.1     | AREDN mesh WAN uplink        |
-| Aredn-Lan   | 41      | 10.6.229.8/29      | —               | AREDN mesh LAN segment       |
-| IoT         | 100     | 172.20.100.0/24    | 172.20.100.1    | Smart home / IoT devices     |
-| Guest       | 200     | 172.20.200.0/24    | 172.20.200.1    | Guest Wi-Fi (isolated)       |
+| Name        | VLAN ID | Subnet             | Gateway         | Purpose                                   |
+| ----------- | ------- | ------------------ | --------------- | ----------------------------------------- |
+| Default     | 1       | 172.20.1.0/24      | 172.20.1.1      | Management / primary devices              |
+| Personal    | 10      | 172.20.10.0/24     | 172.20.10.1     | Personal computers, phones                |
+| **Servers** | **20**  | **172.20.20.0/24** | **172.20.20.1** | **Homelab server + NAS**                  |
+| Work        | 30      | 172.20.30.0/24     | 172.20.30.1     | Work devices (isolated)                   |
+| Aredn-Wan   | 40      | 172.20.40.0/24     | 172.20.40.1     | AREDN mesh WAN uplink                     |
+| Aredn-Lan   | 41      | 10.6.229.8/29      | —               | AREDN mesh LAN — DHCP relay to AREDN node |
+| IoT         | 100     | 172.20.100.0/24    | 172.20.100.1    | Smart home / IoT devices                  |
+| Guest       | 200     | 172.20.200.0/24    | 172.20.200.1    | Guest Wi-Fi (isolated)                    |
 
-### Key Device Assignments (Servers VLAN — 172.20.20.0/24)
+### Key Device Assignments
 
-| Device                      | IP           | Notes                                                                 |
-| --------------------------- | ------------ | --------------------------------------------------------------------- |
-| UDR7 (Servers VLAN gateway) | 172.20.20.1  | Main DNS server for all VLANs; forwards `id.in.alybadawy.com` to DC  |
-| NAS (UGreen → UniFi UNAS 4) | 172.20.20.10 | NFS exports for Nextcloud + Immich                                    |
-| Homelab server (Beelink)    | 172.20.20.5  | OS hostname: `dc.id.in.alybadawy.com` (required by Samba AD); also reachable as `lab.in.alybadawy.com` via UDR7 DNS alias |
+| Device                   | VLAN           | IP           | Notes                                                                                                                     |
+| ------------------------ | -------------- | ------------ | ------------------------------------------------------------------------------------------------------------------------- |
+| UDR7 (Servers gateway)   | Servers (20)   | 172.20.20.1  | Main DNS server for all VLANs                                                                                             |
+| Homelab server (Beelink) | Servers (20)   | 172.20.20.5  | OS hostname: `dc.id.in.alybadawy.com` (required by Samba AD); also reachable as `lab.in.alybadawy.com` via UDR7 DNS alias |
+| UniFi NAS                | Servers (20)   | 172.20.20.10 | NFS exports for Nextcloud + Immich                                                                                        |
+| AREDN node (WAN port)    | Aredn-Wan (40) | 172.20.40.2  | AREDN mesh WAN uplink                                                                                                     |
+| AREDN node (LAN port)    | Aredn-Lan (41) | 10.6.229.9   | AREDN mesh LAN — also the DHCP server for VLAN 41                                                                         |
 
-> **Note on hostname:** Samba AD requires the machine's OS hostname to match the DC FQDN (`dc.id.in.alybadawy.com`). All existing DNS aliases (`lab.in.alybadawy.com`, `*.in.alybadawy.com` service subdomains) continue to work via UDR7 local DNS records pointing to `172.20.20.5`.
+> **Note on hostname:** Samba AD requires the machine's OS hostname to match the DC FQDN (`dc.id.in.alybadawy.com`). All service subdomains (`*.in.alybadawy.com`) continue to work via UDR7 local DNS records pointing to `172.20.20.5`.
 
-> **Why Servers VLAN?** Placing both the homelab and NAS on the same VLAN means NFS traffic between them stays entirely within VLAN 20 at LAN speeds, without traversing firewall rules between VLANs. Personal and IoT devices access services through NPM via inter-VLAN routing controlled by the UDR7 firewall.
+> **Why Servers VLAN for both homelab and NAS?** Placing both on the same VLAN means NFS traffic stays entirely within VLAN 20 at LAN speeds, without traversing firewall rules between VLANs. Other devices access services through NPM via inter-VLAN routing controlled by the UDR7 firewall.
 
 ---
 
@@ -33,109 +64,69 @@ The home network uses UniFi VLAN segmentation for isolation between device class
 
 ### Public DNS (Vercel)
 
-The public DNS records allow external Let's Encrypt validation and map the domain to the home network:
+Only `in.alybadawy.com` is exposed publicly. Individual service subdomains are internal-only — they resolve publicly via the wildcard CNAME, but no ports are forwarded, so they are only reachable from LAN or VPN.
 
 ```
-in.alybadawy.com          A record    → UDR7 public IP
-                                            (auto-updated by user script)
-
-*.in.alybadawy.com        CNAME       → in.alybadawy.com
+in.alybadawy.com          A       → UDR7 public IP (auto-updated by DDNS script)
+*.in.alybadawy.com        CNAME   → in.alybadawy.com
 ```
 
-- The A record points to the UDR7's public IP, which is dynamic and updated periodically by a script
-- The wildcard CNAME allows any subdomain (photos.in.alybadawy.com, cloud.in.alybadawy.com, etc.) to resolve through the same public A record
-- Let's Encrypt DNS-01 challenges use the Vercel API to validate domain ownership for wildcard cert issuance
+- The wildcard CNAME exists primarily to allow Let's Encrypt DNS-01 validation for the wildcard cert
+- No public ports are forwarded to the homelab — all services are LAN + VPN only
+- The A record is updated automatically when the UDR7's public IP changes
 
 ### Internal DNS (UniFi UDR7 Built-in DNS)
 
-The UDR7 DNS server overrides public DNS for internal clients, ensuring direct routing without hairpin NAT. Records are configured under **UniFi → Network → DNS → Local DNS Records**.
+The UDR7 DNS server overrides public DNS for internal clients, ensuring direct routing without hairpin NAT. Configured under **UniFi → Network → DNS → Local DNS Records**.
 
 **Host (A) Records:**
 
 | Domain                 | IP             | Notes                                            |
 | ---------------------- | -------------- | ------------------------------------------------ |
-| `lab.in.alybadawy.com` | `172.20.20.5`  | Homelab server — all CNAMEs resolve through this |
-| `nas.in.alybadawy.com` | `172.20.20.10` | NAS direct hostname                              |
-| `localnode.local.mesh` | `10.6.229.9`   | AREDN mesh node                                  |
+| `lab.in.alybadawy.com` | `172.20.20.5`  | Homelab server — all service CNAMEs resolve here |
+| `nas.in.alybadawy.com` | `172.20.20.10` | UniFi NAS direct hostname                        |
 
 **Alias (CNAME) Records — all point to `lab.in.alybadawy.com`:**
 
-| Domain                     | →                      |
+| Domain                     | → Target               |
 | -------------------------- | ---------------------- |
 | `proxy.in.alybadawy.com`   | `lab.in.alybadawy.com` |
 | `dockers.in.alybadawy.com` | `lab.in.alybadawy.com` |
-| `netdata.in.alybadawy.com` | `lab.in.alybadawy.com` |
-| `nas-ui.in.alybadawy.com`  | `lab.in.alybadawy.com` |
+| `monitor.in.alybadawy.com` | `lab.in.alybadawy.com` |
 | `photos.in.alybadawy.com`  | `lab.in.alybadawy.com` |
 | `cloud.in.alybadawy.com`   | `lab.in.alybadawy.com` |
+| `ha.in.alybadawy.com`      | `lab.in.alybadawy.com` |
 
-All TTLs are set to Auto. Rather than a single wildcard `*.in.alybadawy.com` A record, each service subdomain is explicitly registered as a CNAME. This makes DNS intent visible and avoids resolving non-existent services.
+Each service subdomain resolves to `lab.in.alybadawy.com` → `172.20.20.5`, landing on NPM. New services require a new CNAME entry here.
 
-- Internal clients query UDR7's DNS
-- Each subdomain CNAME resolves to `lab.in.alybadawy.com`, which resolves to `172.20.20.5`
-- Traffic arrives directly at NPM on the homelab — no internet roundtrip (no hairpin NAT)
-- New services require a new CNAME entry in UDR7's Local DNS Records
+**DNS Forward Zones:**
 
-**DNS Forward Zone (Active Directory):**
+Configured in **UniFi → Network → DNS → DNS Forwarding**:
 
-| Zone                    | Forwarded To  | Purpose                                              |
-| ----------------------- | ------------- | ---------------------------------------------------- |
-| `id.in.alybadawy.com`   | `172.20.20.5` | Delegates all AD DNS queries to Samba DC on port 53  |
+| Zone                  | Forwarded To  | Purpose                                                    |
+| --------------------- | ------------- | ---------------------------------------------------------- |
+| `id.in.alybadawy.com` | `172.20.20.5` | Delegates all AD DNS queries to Samba DC on port 53        |
+| `*.local.mesh`        | `10.6.229.9`  | Forwards all AREDN mesh hostname queries to the AREDN node |
 
-Configured in UniFi → Network → DNS → DNS Forwarding. This allows all VLANs to resolve AD records (DC hostname, Kerberos SRV records, LDAP SRV records) through the UDR7, which in turn asks Samba. Samba forwards non-AD queries back to `172.20.20.1` (UDR7).
+- **AD zone:** Samba handles all records under `id.in.alybadawy.com` (DC hostname, Kerberos SRV, LDAP SRV). Samba forwards non-AD queries back to UDR7 at `172.20.20.1`.
+- **AREDN zone:** The AREDN node manages `*.local.mesh` hostnames internally. UDR7 forwards queries to it, allowing homelab clients to resolve AREDN mesh services by hostname without any manual configuration.
 
 ### Why This Two-Level Setup Works for TLS
 
-1. **Let's Encrypt Validation**
-   - acme.sh (running on homelab) performs DNS-01 challenge via Vercel API
-   - Vercel API updates the public A and CNAME records
-   - Let's Encrypt validates ownership and issues the wildcard cert for `*.in.alybadawy.com`
-
-2. **Internal Client Resolution**
-   - LAN clients query UDR7 DNS
-   - `photos.in.alybadawy.com` resolves to homelab server IP (172.20.20.5)
-   - Request hits NPM directly on the local network (no internet roundtrip)
-
-3. **TLS Validity**
-   - The wildcard cert is publicly signed (by Let's Encrypt)
-   - All major browsers and OS trust Let's Encrypt as a root CA
-   - Clients connecting to `photos.in.alybadawy.com` receive a valid cert matching the hostname
-   - No SSL warnings or browser errors
-
-4. **External/VPN Access**
-   - External users or VPN-connected devices also resolve to the homelab IP (via UDR7 DNS)
-   - The TLS cert is valid for all subdomain patterns
-   - Same cert, same security, works seamlessly across all networks
+1. **Let's Encrypt Validation** — acme.sh performs DNS-01 challenge via Vercel API. Vercel adds the TXT record, Let's Encrypt validates it, and issues the wildcard cert.
+2. **Internal Resolution** — LAN clients query UDR7 DNS; `photos.in.alybadawy.com` resolves directly to `172.20.20.5`, bypassing any internet roundtrip.
+3. **TLS Validity** — The wildcard cert is publicly signed by Let's Encrypt, trusted by all major clients. No browser warnings.
+4. **VPN Access** — VPN clients receive LAN IPs and use UDR7 DNS, so they resolve and access services identically to LAN clients.
 
 ---
 
 ## VPN Access
 
-### UniFi VPN Server Configuration
+- **VPN Endpoint**: UDR7 (the router — not the homelab)
+- **VPN Type**: WireGuard (UniFi built-in)
+- **Client IP Pool**: Personal VLAN (172.20.10.0/24)
 
-- **VPN Endpoint**: UDR7 (the router/gateway)
-- **VPN Type**: Typically WireGuard or OpenVPN (UniFi supports both)
-- **Client IP Pool**: Assigned from the same LAN subnet or a separate range within the UDR7's managed subnets
-
-### VPN Client Flow
-
-```
-VPN Client (remote)
-        |
-        → Connects to UDR7 via WireGuard/OpenVPN
-        |
-        → Receives a LAN IP on the Personal VLAN (172.20.10.0/24)
-        |
-        → Queries UDR7 DNS for *.in.alybadawy.com
-        |
-        → Resolves to homelab IP (172.20.20.5)
-        |
-        → Connects to NPM on homelab, same as LAN client
-```
-
-- VPN clients are effectively on the LAN from a network perspective
-- They see the same DNS, access the same services, use the same TLS certs
-- No additional configuration needed per-service for VPN support
+VPN clients receive a LAN IP, query UDR7 DNS, and access homelab services identically to local clients — same DNS, same TLS certs, no per-service configuration needed.
 
 ---
 
@@ -143,180 +134,136 @@ VPN Client (remote)
 
 ### Homelab Server Ports
 
-| Port          | Service        | Scope                        | Purpose                                              |
-| ------------- | -------------- | ---------------------------- | ---------------------------------------------------- |
-| 53 (TCP/UDP)  | Samba AD (DNS) | LAN (Servers VLAN + forwarded from UDR7) | AD zone DNS — `id.in.alybadawy.com`    |
-| 88 (TCP/UDP)  | Samba AD (Kerberos) | LAN                    | Kerberos ticket issuance for AD clients              |
-| 389 (TCP)     | Samba AD (LDAP) | LAN (Docker + LAN)          | LDAP bind for services (Nextcloud, NAS, etc.)        |
-| 445 (TCP)     | Samba AD (SMB) | LAN                          | AD DC management (samba-tool, Windows admin tools)   |
-| 464 (TCP/UDP) | Samba AD (Kerberos pw) | LAN               | Kerberos password change                             |
-| 636 (TCP)     | Samba AD (LDAPS) | LAN (Docker + LAN)         | Secure LDAP for services                             |
-| 49152–65535   | Samba AD (RPC) | LAN                          | Dynamic RPC ports for AD DC replication/management   |
-| 80            | NPM (HTTP)     | LAN + VPN                    | Redirect HTTP → HTTPS                                |
-| 443           | NPM (HTTPS)    | LAN + VPN                    | All web services via reverse proxy                   |
-| 19999         | Netdata        | Host network, LAN accessible | Metrics dashboard (also proxied via NPM)             |
-| All other service ports | (Docker containers) | Docker networks only | Internal communication only                 |
+| Port          | Service                | Scope                     | Purpose                                            |
+| ------------- | ---------------------- | ------------------------- | -------------------------------------------------- |
+| 53 (TCP/UDP)  | Samba AD (DNS)         | LAN — forwarded from UDR7 | AD zone DNS for `id.in.alybadawy.com`              |
+| 88 (TCP/UDP)  | Samba AD (Kerberos)    | LAN                       | Kerberos ticket issuance for AD clients            |
+| 389 (TCP)     | Samba AD (LDAP)        | LAN (Docker + LAN)        | LDAP bind for services (Nextcloud, NAS, etc.)      |
+| 445 (TCP)     | Samba AD (SMB)         | LAN                       | AD DC management (samba-tool, Windows admin tools) |
+| 464 (TCP/UDP) | Samba AD (Kerberos pw) | LAN                       | Kerberos password change                           |
+| 636 (TCP)     | Samba AD (LDAPS)       | LAN (Docker + LAN)        | Secure LDAP for services                           |
+| 49152–65535   | Samba AD (RPC)         | LAN                       | Dynamic RPC ports for AD DC management             |
+| 80            | NPM (HTTP)             | LAN + VPN                 | Redirect HTTP → HTTPS                              |
+| 443           | NPM (HTTPS)            | LAN + VPN                 | All web services via reverse proxy                 |
+| 45876         | Beszel Agent           | Host (loopback to hub)    | Beszel hub → agent metrics stream (internal only)  |
+| All others    | Docker containers      | Docker networks only      | Internal communication only                        |
+
+> **NPM port 81 (admin UI):** Exposed temporarily during initial setup only. Once NPM is accessible at `https://proxy.in.alybadawy.com`, port 81 is removed from the stack and closed via UFW.
 
 ### Firewall Notes
 
-- **UDR7 Firewall Rules**: User has pre-configured firewall rules on the UDR7
-- **No Port Forwarding**: The UDR7 does NOT forward any ports from the internet to the homelab
-- **Internet-Facing Endpoint**: Only the UDR7 itself is internet-facing (VPN service)
-- **Homelab Isolation**: The homelab is only accessible via LAN or authenticated VPN
-- **Implicit Deny**: Any traffic not explicitly allowed by UDR7 rules is dropped
+- **No Port Forwarding** from internet to homelab — the UDR7 does not forward any external ports
+- **Internet-Facing**: Only the UDR7 itself (VPN endpoint)
+- **Homelab**: LAN + authenticated VPN access only
+- **Implicit Deny**: Traffic not explicitly allowed by UDR7 rules is dropped
 
 ---
 
 ## Docker Network Topology
 
-### Network Design Goals
-
-- Isolate services by function (proxy, apps)
-- Minimize cross-network traffic (services talk over bridges)
-- Identity (Samba AD) runs bare-metal — not inside Docker — and is reachable on host LAN ports
-
 ### Network Definitions
+
+Three pre-created external bridge networks are used. All Docker networks are created before any stack is deployed and are shared across stacks.
 
 #### 1. `proxy` Network
 
-**Purpose**: HTTP/HTTPS traffic entry point
-**Services on this network**:
+Services that need to be reachable through Nginx Proxy Manager:
 
-- Nginx Proxy Manager (main traffic handler)
-- Any services that need external HTTP access via NPM
+- Nginx Proxy Manager
+- Portainer
+- Beszel Hub
+- Nextcloud (front-end)
+- Immich Server (front-end)
 
-**Rationale**: NPM sits on the proxy network to receive incoming traffic and route it to backend services.
+#### 2. `databases` Network
 
-#### 2. `apps` Network
+Shared data services — only PostgreSQL and Redis:
 
-**Purpose**: Application services and their shared data stores
-**Services on this network**:
+- PostgreSQL (global)
+- Redis (global)
+
+Services that need database access (Nextcloud, Immich Server) also join this network.
+
+#### 3. `apps` Network
+
+Application-layer communication — services that need to talk to each other:
 
 - Nextcloud
-- Immich (server + ML)
-- Home Assistant
-- PostgreSQL (global shared instance)
-- Redis (global shared instance)
+- Immich Server
+- Immich Machine Learning
 
-**Rationale**: All apps and their infrastructure share this bridge for low-latency internal communication.
+#### Host Network
 
-> **Note on identity:** Samba 4 AD is a bare-metal service running on the host, not in Docker. Services that need LDAP/LDAPS authentication connect to `172.20.20.5:389` or `172.20.20.5:636` directly — or use `host.docker.internal` if needed — rather than via a Docker network.
+- **Beszel Agent** — runs with `network_mode: host` to observe real host-level CPU, memory, disk, and network interface stats
 
 ### Network Diagram
 
 ```
-┌─────────────────────────────────────────────────────────────┐
-│                      Docker Host                            │
-├─────────────────────────────────────────────────────────────┤
-│                                                             │
-│  [Samba 4 AD DC] (bare-metal, ports 53/88/389/445/636)      │
-│        ↑ ↓  (LAN reachable; Docker containers connect via   │
-│              host IP 172.20.20.5 or host.docker.internal)   │
-│                                                             │
-│  ┌──────────────── proxy network ────────────────┐          │
-│  │                                               │          │
-│  │           [Nginx Proxy Manager]               │          │
-│  │                                               │          │
-│  └─────────────────────────────────────────────-─┘          │
-│           ↑                                                 │
-│           │ (External traffic: ports 80, 443)               │
-│                                                             │
-│  ┌──────────────── apps network ────────────────────┐       │
-│  │                                                  │       │
-│  │  [Nextcloud]  ←→  [Immich]  ←→  [Home Assistant] │       │
-│  │       ↓              ↓              ↓            │       │
-│  │    [PostgreSQL] ←→ [Redis]                       │       │
-│  │                                                  │       │
-│  └─────────────────────────────────────────────---──┘       │
-│                                                             │
-└─────────────────────────────────────────────────────────────┘
+┌──────────────────────────────────────────────────────────────────┐
+│                          Docker Host                             │
+├──────────────────────────────────────────────────────────────────┤
+│                                                                  │
+│  [Samba 4 AD DC] (bare-metal — ports 53/88/389/445/636)          │
+│  [acme.sh]       (bare-metal — cron, writes to /opt/certs/)      │
+│  [Beszel Agent]  (host network — port 45876)                     │
+│                                                                  │
+│  ┌──────────────── proxy ──────────────────────────────┐         │
+│  │  [NPM]  [Portainer]  [Beszel Hub]                   │         │
+│  │  [Nextcloud]  [Immich Server]                        │         │
+│  └──────────────────────────┬───────────────────────---┘         │
+│                             │ (ports 80, 443)                    │
+│  ┌──────── databases ───────┼──────────────────────────┐         │
+│  │  [PostgreSQL]  [Redis]   │                          │         │
+│  │  [Nextcloud]  [Immich Server]  ← also on this net   │         │
+│  └──────────────────────────┼───────────────────────---┘         │
+│                             │                                    │
+│  ┌──────────── apps ────────┴──────────────────────────┐         │
+│  │  [Nextcloud]  [Immich Server]  [Immich ML]           │         │
+│  └─────────────────────────────────────────────────----┘         │
+│                                                                  │
+│  [Home Assistant] → network_mode: host                           │
+│                                                                  │
+└──────────────────────────────────────────────────────────────────┘
 ```
 
-### Docker Compose Network Setup (Conceptual)
-
-```yaml
-networks:
-  proxy:
-    driver: bridge
-    ipam:
-      config:
-        - subnet: 172.20.0.0/16
-
-  apps:
-    driver: bridge
-    ipam:
-      config:
-        - subnet: 172.22.0.0/16
-
-services:
-  npm:
-    networks:
-      - proxy
-
-  postgres:
-    networks:
-      - apps
-
-  redis:
-    networks:
-      - apps
-
-  nextcloud:
-    networks:
-      - proxy
-      - apps
-
-  immich-server:
-    networks:
-      - proxy
-      - apps
-
-  immich-ml:
-    networks:
-      - apps
-
-  home-assistant:
-    networks:
-      - proxy
-```
+> **NPM port 81:** Active only during initial setup. Removed from the stack once NPM is proxied through itself at `https://proxy.in.alybadawy.com`.
 
 ---
 
 ## Traffic Flow Summary
 
-### Inbound (External/VPN Client → Homelab Service)
+### Inbound (Client → Homelab Service)
 
 ```
 1. Client queries UDR7 DNS for photos.in.alybadawy.com
 2. UDR7 responds with homelab IP (172.20.20.5)
 3. Client initiates TLS to NPM (homelab:443)
 4. NPM terminates TLS, checks Host header
-5. NPM routes to Immich container on apps network
-6. Immich validates the user session (OIDC or built-in auth backed by Samba AD)
-7. If authenticated, Immich queries PostgreSQL (apps network)
-8. Immich fetches media from NAS (/mnt/nfs/immich)
+5. NPM routes to Immich Server container (proxy network)
+6. Immich validates user session (OIDC or built-in auth)
+7. Immich queries PostgreSQL (databases network)
+8. Immich fetches media from NAS (/mnt/nas/homelab/immich via NFS)
 9. Response returns through NPM → TLS → Client
 ```
 
-### Intra-Service (Service → Service)
-
-```
-Example: Immich Server → PostgreSQL
-
-1. Immich (apps network) connects to postgres:5432
-2. Connection routed via Docker bridge to postgres container (also apps network)
-3. Direct LAN-local communication, no TLS needed internally
-4. Data transaction completes
-```
-
-### Service → Authentication Check (LDAP example)
+### Service → Authentication (LDAP example)
 
 ```
 1. Nextcloud receives login request
 2. Nextcloud connects to Samba AD at 172.20.20.5:636 (LDAPS)
-3. Samba validates credentials against the AD user database
+3. Samba validates credentials against AD user database
 4. Samba returns user attributes (uid, groups, email)
 5. Nextcloud grants access and establishes a session
+```
+
+### AREDN Mesh DNS Resolution
+
+```
+1. Client queries UDR7 DNS for hostname.local.mesh
+2. UDR7 DNS forward zone matches *.local.mesh
+3. Query forwarded to AREDN node at 10.6.229.9
+4. AREDN node resolves the mesh hostname and returns IP
+5. Client connects directly to the AREDN mesh service
 ```
 
 ---
@@ -325,37 +272,36 @@ Example: Immich Server → PostgreSQL
 
 ### Network Isolation
 
-- **Samba AD ports (389, 636, 88, etc.)** are LAN-accessible within Servers VLAN; not forwarded to internet
-- **PostgreSQL port 5432** is internal-only; accessed only by containers on the `apps` network
-- **Redis port 6379** is internal-only; accessed only by containers on the `apps` network
-- **NPM port 81 (admin UI)** is accessible from LAN but should use strong credentials; consider further restricting with firewall rules
+- **Samba AD ports (389, 636, 88, etc.)** — LAN-accessible; not forwarded to internet
+- **PostgreSQL port 5432** — internal-only; containers on the `databases` network only
+- **Redis port 6379** — internal-only; containers on the `databases` network only
+- **NPM port 81** — temporary during initial setup only; removed once NPM is self-proxied
 
 ### TLS & Encryption
 
-- **External traffic (ports 80, 443)**: Always encrypted via TLS after HTTP→HTTPS redirect
-- **Internal Docker traffic**: Unencrypted but isolated to local bridges (not routable to LAN)
-- **LDAPS (port 636)**: Services connecting to Samba AD use LDAPS for encrypted credential exchange
-- **NAS traffic (NFS)**: Unencrypted but on trusted LAN; consider NFS over TLS in future if security posture changes
+- **External traffic (ports 80, 443)** — always encrypted via TLS after HTTP→HTTPS redirect
+- **Internal Docker traffic** — unencrypted but isolated to Docker bridge networks (not routable to LAN)
+- **LDAPS (port 636)** — services connecting to Samba AD use LDAPS for encrypted credential exchange
+- **NAS traffic (NFS)** — unencrypted but on trusted Servers VLAN; consider NFS over Kerberos for future hardening
 
 ### Authentication
 
 - **Samba 4 AD** is the centralized identity provider; credentials are never stored per-service
-- **LDAPS (636)** used by services like Nextcloud and NAS for secure directory lookups
-- **Samba AD is not internet-facing**; LDAP/Kerberos ports are LAN-only
-- **VPN access** requires WireGuard/OpenVPN keys; users on VPN are treated as LAN users
+- **LDAPS (636)** used by Nextcloud and NAS for secure directory lookups
+- **Samba AD is not internet-facing** — LDAP/Kerberos ports are LAN-only
+- **VPN access** requires WireGuard keys; VPN clients are treated as LAN users
 
 ### Firewall Defense-in-Depth
 
-- **UDR7 firewall**: First line of defense; blocks unsolicited inbound traffic
-- **Docker bridge isolation**: Second line; prevents direct access to internal ports
-- **Samba AD auth**: Third line; services validate credentials against AD regardless of network path
+- **UDR7 firewall** — first line of defense; blocks unsolicited inbound traffic
+- **Docker bridge isolation** — second line; prevents direct access to internal ports from LAN
+- **Samba AD auth** — third line; services validate credentials against AD regardless of network path
 
 ---
 
 ## Future Enhancements
 
-1. **NFS over TLS**: If storing highly sensitive data, encrypt NFS with TLS-based protocols (e.g., NFSv4.2 with Kerberos)
-2. **mTLS between services**: Add client certificates for Docker-to-Docker communication if zero-trust is desired
-3. **Network segmentation**: Create separate VLANs for cameras, IoT devices, trusted clients (Home Assistant integration with UniFi automation)
-4. **DDoS protection**: If domain becomes public, enable Cloudflare or similar CDN with DDoS mitigation
-5. **Audit logging**: Collect and centralize logs from NPM, Authentik, and services for compliance/debugging
+1. **NFS over Kerberos** — encrypt NFS traffic using AD-integrated Kerberos for the NAS mounts
+2. **mTLS between services** — add client certificates for Docker-to-Docker communication if zero-trust posture is required
+3. **IoT VLAN automation** — UniFi automation rules between Home Assistant and IoT VLAN devices
+4. **Audit logging** — centralize logs from NPM and services for security review
