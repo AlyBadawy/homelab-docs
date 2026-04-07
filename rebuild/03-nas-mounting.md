@@ -144,7 +144,7 @@ Append this line at the bottom:
 
 ```
 # NAS NFS mount (172.20.20.10 — Servers VLAN)
-172.20.20.10:/volume1/homelab  /mnt/nas/homelab  nfs  _netdev,nofail,x-systemd.automount,x-systemd.mount-timeout=30,soft,timeo=100,retrans=3,rsize=131072,wsize=131072,noatime  0 0
+172.20.20.10:/var/nfs/shared/homelab  /mnt/nas/homelab  nfs  _netdev,nofail,x-systemd.automount,x-systemd.mount-timeout=30,soft,timeo=100,retrans=3,rsize=131072,wsize=131072,noatime  0 0
 ```
 
 **What each option does:**
@@ -191,7 +191,7 @@ Verify the mount is live:
 ```bash
 mount | grep nfs
 # Expected output:
-# 172.20.20.10:/volume1/homelab on /mnt/nas/homelab type nfs (rw,relatime,...)
+# 172.20.20.10:/var/nfs/shared/homelab on /mnt/nas/homelab type nfs (rw,relatime,...)
 ```
 
 Verify subfolders exist:
